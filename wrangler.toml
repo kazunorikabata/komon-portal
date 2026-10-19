@@ -18,7 +18,7 @@ routes = [
 [[d1_databases]]
 binding = "DB"
 database_name = "komon-portal"
-database_id = "ここにD1のIDを入れる"
+database_id = "5d5a6b6f-df33-47a2-9ba6-0ec7c29d059e"
 migrations_dir = "migrations"
 
 [vars]
