@@ -23,7 +23,8 @@
 | ファイル | 内容 |
 |---|---|
 | `src/worker.js` | ログインの確認、権限の判定、API |
-| `public/client/index.html` | 顧問先のページ |
+| `public/t/<ひな形>/index.html` | 顧問先のページ。顧問先ごとに使うひな形を選ぶ（今は `peters` だけ） |
+| `src/templates.js` | ひな形の一覧（名前と説明） |
 | `public/office/index.html` | 事務所のページ（仕訳変換・JDL出力・月末残高・修正依頼の承認・顧問先の登録） |
 | `migrations/0001_init.sql` | データベースの表 |
 | `wrangler.toml` | Cloudflare の設定 |
@@ -38,7 +39,7 @@ kabaoffice.com を Cloudflare に追加して、Xserver でネームサーバー
 1. Cloudflare のダッシュボード →「ストレージとデータベース」→「D1」→「データベースを作成」
 2. 名前は `komon-portal`
 3. 作成後に表示される **データベースID** を `wrangler.toml` の `database_id` に入れる
-4. そのデータベースの「コンソール」を開き、`migrations/0001_init.sql` の中身を貼り付けて実行する
+4. そのデータベースの「コンソール」を開き、`migrations/` の SQL を番号順（`0001`、`0002`…）にすべて貼り付けて実行する
 
 ### 3. ログイン（Cloudflare Access）を設定する
 1. ダッシュボード →「Zero Trust」を開き、チーム名を決める（例：`kabaoffice` → `kabaoffice.cloudflareaccess.com`）
@@ -68,13 +69,27 @@ kabaoffice.com を Cloudflare に追加して、Xserver でネームサーバー
 2. 「顧問先とログインできるメールアドレス」で顧問先を追加し、顧問先の担当者のメールアドレスを登録する
 3. 表に出る顧問先のページのアドレスを、顧問先に伝える
 
+## 顧問先ごとの画面（ひな形）
+
+顧問先のページは、顧問先ごとに「ひな形」を選んで使います。
+- `peters`：現金出納帳（入金・経費精算・その他）、売上精算書・入金確認、仕入一覧（請求書）
+- ほかの顧問先用の画面は、`public/t/<名前>/index.html` を作り、`src/templates.js` に名前と説明を足します
+- 事務所のページで顧問先を追加するときに、使うひな形を選びます
+- 事務所のページの仕訳変換は、今は `peters` 用だけです（`public/office/index.html` の `JOURNAL_TEMPLATES`）
+
+## データベースの変更（migrations）を足したとき
+`migrations/` に新しい SQL を足したときは、D1 の「コンソール」でその SQL を実行してから公開してください。
+
 ## 手元での動作確認
 
 ```sh
 printf 'DEV_EMAIL=staff@example.com\nSTAFF_EMAILS=staff@example.com\n' > .dev.vars
 npx wrangler d1 migrations apply komon-portal --local
-npx wrangler dev
-# 事務所： curl -H 'Host: office.kabaoffice.com' http://127.0.0.1:8787/api/me
+# 事務所として動かす
+npx wrangler dev --local-upstream office.kabaoffice.com
+curl http://127.0.0.1:8787/api/me
+# 顧問先として動かす（c-xxxx は登録したサブドメイン）
+npx wrangler dev --local-upstream c-xxxx.kabaoffice.com
 ```
 `DEV_EMAIL` を入れたときはログインの確認を飛ばします。**本番の設定には入れないでください。**
 

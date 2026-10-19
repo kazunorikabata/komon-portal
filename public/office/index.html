@@ -161,6 +161,7 @@ html, body { margin: 0; }
       <div class="fields">
         <label class="f" for="nc-name">新しい顧問先の名前<input type="text" id="nc-name" placeholder="例：株式会社〇〇"></label>
         <label class="f" for="nc-sub">サブドメイン（空欄なら自動で決める）<input type="text" id="nc-sub" placeholder="例：c-7f3k"></label>
+        <label class="f" for="nc-tpl">使う画面<select id="nc-tpl"></select></label>
       </div>
       <div class="foot"><span class="msg" id="ncMsg" role="status"></span><button type="button" class="btn" id="ncAdd">顧問先を追加する</button></div>
       <div class="fields">
@@ -170,6 +171,7 @@ html, body { margin: 0; }
     </details>
   </section>
 
+  <p class="hint" id="tplNote" hidden></p>
   <div id="main" hidden style="display:grid;gap:22px">
   <section class="status">
     <div class="chips" id="chips"></div>
@@ -240,7 +242,9 @@ html, body { margin: 0; }
   setMonth(`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`);
 
   // 選んでいる顧問先のデータ（サーバーから読み込む）
-  let clients = [], current = null, docs = {}, CLIENT = null;
+  let clients = [], current = null, docs = {}, CLIENT = null, templates = {};
+  // 仕訳変換ができる画面の種類（ほかの種類は、その顧問先用の変換を作ってから足す）
+  const JOURNAL_TEMPLATES = ['peters'];
   function buildClient() {
     const months = Object.keys(docs).filter(k => k.startsWith('m:')).map(k => k.slice(2)).sort();
     const md = m => docs['m:' + m]?.data || {};
@@ -426,9 +430,12 @@ html, body { margin: 0; }
   }
 
   function render() {
-    $('main').hidden = !current;
+    const canJournal = !!current && JOURNAL_TEMPLATES.includes(current.template || 'peters');
+    $('main').hidden = !canJournal;
+    $('tplNote').hidden = !current || canJournal;
+    if (current && !canJournal) $('tplNote').textContent = `${current.name} の画面（${templates[current.template] || current.template}）用の仕訳変換はまだありません。修正依頼の承認とメールアドレスの登録はできます。`;
     renderAdmin();
-    if (!current) return;
+    if (!canJournal) return;
     buildClient();
     const ms = monthState(); $('submitted').className = 'pill ' + ms.cls; $('submitted').textContent = ms.label;
     $('clientTitle').textContent = `${current.name} 様`;
@@ -577,9 +584,9 @@ html, body { margin: 0; }
     const sel = $('clientSel');
     sel.innerHTML = '<option value="">顧問先を選ぶ</option>' + clients.map(c => `<option value="${c.id}"${current?.id === c.id ? ' selected' : ''}>${esc(c.name)}</option>`).join('');
     const host = location.hostname.split('.').slice(1).join('.');
-    $('clientTable').innerHTML = `<thead><tr><th>顧問先</th><th>ページのアドレス</th><th>ログインできるメールアドレス</th></tr></thead><tbody>${clients.map(c => `<tr>
-      <td>${esc(c.name)}</td><td><code>https://${esc(c.subdomain)}.${esc(host)}</code></td>
-      <td>${c.emails.map(e => `<div>${esc(e)} <button type="button" class="link-btn danger" data-rmmail="${esc(e)}" data-client="${c.id}">外す</button></div>`).join('') || '<span class="hint">まだありません</span>'}</td></tr>`).join('') || '<tr><td colspan="3" class="hint">まだ顧問先がありません</td></tr>'}</tbody>`;
+    $('clientTable').innerHTML = `<thead><tr><th>顧問先</th><th>使う画面</th><th>ページのアドレス</th><th>ログインできるメールアドレス</th></tr></thead><tbody>${clients.map(c => `<tr>
+      <td>${esc(c.name)}</td><td>${esc(templates[c.template] || c.template)}</td><td><code>https://${esc(c.subdomain)}.${esc(host)}</code></td>
+      <td>${c.emails.map(e => `<div>${esc(e)} <button type="button" class="link-btn danger" data-rmmail="${esc(e)}" data-client="${c.id}">外す</button></div>`).join('') || '<span class="hint">まだありません</span>'}</td></tr>`).join('') || '<tr><td colspan="4" class="hint">まだ顧問先がありません</td></tr>'}</tbody>`;
     // 修正依頼（選んでいる顧問先の、承認待ちの依頼）
     const pend = [];
     for (const [k, d] of Object.entries(docs)) if (k.startsWith('m:')) (d.data.requests || []).forEach((r, i) => { if (r.status === 'pending') pend.push({ m: k.slice(2), i, r }); });
@@ -591,7 +598,13 @@ html, body { margin: 0; }
 
   const stamp = () => { const t = new Date(); return `${t.getMonth() + 1}月${t.getDate()}日 ${String(t.getHours()).padStart(2, '0')}:${String(t.getMinutes()).padStart(2, '0')}`; };
 
-  async function loadClients() { clients = (await api('/api/office/clients')).clients; }
+  async function loadClients() {
+    clients = (await api('/api/office/clients')).clients;
+    if (!Object.keys(templates).length) {
+      templates = (await api('/api/office/templates')).templates;
+      $('nc-tpl').innerHTML = Object.entries(templates).map(([k, v]) => `<option value="${k}">${esc(v)}</option>`).join('');
+    }
+  }
   async function openClient(id) {
     current = clients.find(c => c.id === id) || null;
     docs = {}; state = defaultOffice(current?.name); officeVersion = 0;
@@ -632,7 +645,7 @@ html, body { margin: 0; }
         await loadClients(); if (current) current = clients.find(c => c.id === current.id); render(); return;
       }
       if (e.target.id === 'ncAdd') {
-        const c = await api('/api/office/clients', { method: 'POST', body: JSON.stringify({ name: $('nc-name').value, subdomain: $('nc-sub').value }) });
+        const c = await api('/api/office/clients', { method: 'POST', body: JSON.stringify({ name: $('nc-name').value, subdomain: $('nc-sub').value, template: $('nc-tpl').value }) });
         $('nc-name').value = ''; $('nc-sub').value = '';
         await loadClients(); await openClient(c.id);
         $('ncMsg').className = 'msg ok'; $('ncMsg').textContent = `${c.name} を追加しました（${c.subdomain}）。`;

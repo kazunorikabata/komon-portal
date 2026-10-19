@@ -1,3 +1,5 @@
+import { TEMPLATES } from './templates.js';
+
 // 顧問先専用ページのサーバー側。
 // 1. Cloudflare Access のログイン（JWT）を確かめて、メールアドレスを得る
 // 2. ホスト名で「どの顧問先のページか」「事務所のページか」を決め、そのメールに権限があるか確かめる
@@ -116,7 +118,7 @@ const MONTH_KEY = /^m:\d{4}-\d{2}$/;
 
 async function clientApi(request, env, url, email, client) {
   const path = url.pathname;
-  if (path === '/api/me' && request.method === 'GET') return json({ email, client: { id: client.id, name: client.name } });
+  if (path === '/api/me' && request.method === 'GET') return json({ email, client: { id: client.id, name: client.name, template: client.template } });
   if (path === '/api/state' && request.method === 'GET') return json({ docs: await loadDocs(env, client.id, false) });
   const m = path.match(/^\/api\/doc\/(master|m:\d{4}-\d{2})$/);
   if (m && request.method === 'PUT') {
@@ -146,8 +148,9 @@ async function officeApi(request, env, url, email) {
   const path = url.pathname, method = request.method;
   if (path === '/api/me' && method === 'GET') return json({ email, office: true });
 
+  if (path === '/api/office/templates' && method === 'GET') return json({ templates: TEMPLATES });
   if (path === '/api/office/clients' && method === 'GET') {
-    const { results } = await env.DB.prepare(`SELECT c.id, c.name, c.subdomain, c.created_at,
+    const { results } = await env.DB.prepare(`SELECT c.id, c.name, c.subdomain, c.template, c.created_at,
       (SELECT group_concat(email, ',') FROM members m WHERE m.client_id = c.id) AS emails FROM clients c ORDER BY c.created_at`).all();
     return json({ clients: results.map(r => ({ ...r, emails: r.emails ? r.emails.split(',') : [] })) });
   }
@@ -158,10 +161,12 @@ async function officeApi(request, env, url, email) {
     const id = crypto.randomUUID();
     let sub = String(body.subdomain || '').trim().toLowerCase() || randomSub();
     if (!/^[a-z0-9][a-z0-9-]{1,30}$/.test(sub) || sub === env.OFFICE_HOST || sub === 'www') return fail(400, 'サブドメインは英小文字・数字・ハイフンで入力してください。');
-    const r = await env.DB.prepare('INSERT OR IGNORE INTO clients (id, name, subdomain, created_at) VALUES (?, ?, ?, ?)').bind(id, name, sub, nowIso()).run();
+    const template = String(body.template || 'peters');
+    if (!TEMPLATES[template]) return fail(400, '画面の種類が正しくありません。');
+    const r = await env.DB.prepare('INSERT OR IGNORE INTO clients (id, name, subdomain, template, created_at) VALUES (?, ?, ?, ?, ?)').bind(id, name, sub, template, nowIso()).run();
     if (!r.meta.changes) return fail(409, 'そのサブドメインはすでに使われています。');
     await audit(env, id, email, 'client.create', { name, sub });
-    return json({ id, name, subdomain: sub });
+    return json({ id, name, subdomain: sub, template });
   }
 
   const cm = path.match(/^\/api\/office\/clients\/([0-9a-f-]{36})(\/.*)?$/);
@@ -239,7 +244,9 @@ export default {
         WHERE c.subdomain = ? AND m.email = ?`).bind(sub, email).first();
       if (!client) return withHeaders(new Response('このページを見る権限がありません。', { status: 403 }));
       if (url.pathname.startsWith('/api/')) return withHeaders(await clientApi(request, env, url, email, client));
-      return withHeaders(await page(env, request, '/client/'));
+      // 顧問先ごとのひな形の画面を返す
+      const tpl = TEMPLATES[client.template] ? client.template : 'peters';
+      return withHeaders(await page(env, request, `/t/${tpl}/`));
     } catch (err) {
       return withHeaders(fail(500, 'サーバーでエラーが起きました。'));
     }
