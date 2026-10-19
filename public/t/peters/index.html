@@ -294,6 +294,7 @@ footer { font-size: 12px; color: var(--ink-soft); display: grid; gap: 4px; }
     <div id="srBox" hidden style="display:grid;gap:14px"></div>
     <div id="payBox" hidden style="display:grid;gap:14px"></div>
     <div id="plBox" hidden style="display:grid;gap:14px"></div>
+    <div id="wageBox" hidden style="display:grid;gap:14px"></div>
     <div class="entry" id="cashPanel" hidden>
       <h3 id="cashPanelTitle">記入する</h3>
       <div class="kind-btns" id="kindBtns">
@@ -413,10 +414,10 @@ footer { font-size: 12px; color: var(--ink-soft); display: grid; gap: 4px; }
 
   const SR_DEFAULT = { title: '売上精算書', toName: '', toAddr: '', toReg: '', fromName: '', fromAddr: '', shutten: 0, rate: 0, mealUnit: 0, gasUnit: 0, fee: 0, staffUnit: 0 };
   // 月ごとのデータの名前（サーバー） → 画面の中での名前
-  const PLURAL = { count: 'counts', submitted: 'submitted', requests: 'requests', log: 'log', sr: 'sr', srPaid: 'srPaid', inv: 'inv', plPaid: 'plPaid' };
+  const PLURAL = { count: 'counts', submitted: 'submitted', requests: 'requests', log: 'log', sr: 'sr', srPaid: 'srPaid', inv: 'inv', plPaid: 'plPaid', wage: 'wage' };
   function emptyState() {
     return { opening: { cash: 0 }, rows: { cash: [], bank: [], sales: [], purchase: [] }, counts: {}, submitted: {}, requests: {}, log: {},
-      sr: {}, srPaid: {}, inv: {}, plPaid: {}, suppliers: [], srSet: { ...SR_DEFAULT } };
+      sr: {}, srPaid: {}, inv: {}, plPaid: {}, wage: {}, suppliers: [], srSet: { ...SR_DEFAULT } };
   }
   // 画面のデータ → サーバーの単位（master と 月ごと）
   function split(s) {
@@ -500,7 +501,7 @@ footer { font-size: 12px; color: var(--ink-soft); display: grid; gap: 4px; }
   let state = emptyState();
   let CLIENT_NAME = '';
   let view = { mode: 'month', ledger: 'cash', month: thisYM, editing: null, cashKind: null, draft: null, submitStep: null, countDraft: null, reqForm: false };
-  try { const t = localStorage.getItem(KEY + ':tab'); if (t === 'cash' || t === 'sr' || t === 'pl') view.ledger = t; } catch (e) {}
+  try { const t = localStorage.getItem(KEY + ':tab'); if (['cash', 'sr', 'pl', 'wage'].includes(t)) view.ledger = t; } catch (e) {}
 
   const $ = s => document.getElementById(s);
   const yen = n => (n || n === 0) ? Number(n).toLocaleString('ja-JP') : '';
@@ -512,7 +513,7 @@ footer { font-size: 12px; color: var(--ink-soft); display: grid; gap: 4px; }
   const inMonth = (r, m) => r.date && r.date.startsWith(m);
   const sorted = rows => rows.slice().sort((a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : 0);
   // 提出は帳簿ごと（現金出納帳・売上精算書・仕入一覧）。以前の「月まとめて」の提出は3つとも提出済みとみなす
-  const BOOKS = { cash: '現金出納帳', sr: '売上精算書', pl: '仕入一覧' };
+  const BOOKS = { cash: '現金出納帳', sr: '売上精算書', pl: '仕入一覧', wage: '給与' };
   const subOf = m => { const v = state.submitted[m]; return typeof v === 'string' ? { cash: v, sr: v, pl: v } : (v || {}); };
   const curBook = () => (BOOKS[view.ledger] ? view.ledger : 'cash');
   const lockedBook = (m, b) => !!subOf(m)[b];
@@ -551,7 +552,8 @@ footer { font-size: 12px; color: var(--ink-soft); display: grid; gap: 4px; }
       const n = state.rows[k].filter(r => inMonth(r, view.month)).length;
       return `<button type="button" role="tab" id="tab-${k}" aria-selected="${k === view.ledger}" data-k="${k}">${LEDGERS[k].name}<span class="count">${n}</span></button>`;
     }).join('') + `<button type="button" role="tab" id="tab-sr" aria-selected="${view.ledger === 'sr'}" data-k="sr">売上精算書・入金確認<span class="count">${state.sr?.[view.month] ? '済' : '未'}</span>${payRows().some(r => r.st.cls === 'late') ? '<span class="count" style="color:var(--out)">期限超過あり</span>' : ''}</button>` +
-      `<button type="button" role="tab" id="tab-pl" aria-selected="${view.ledger === 'pl'}" data-k="pl">仕入一覧（請求書）<span class="count">${plInvoices(view.month).length}</span></button>`;
+      `<button type="button" role="tab" id="tab-pl" aria-selected="${view.ledger === 'pl'}" data-k="pl">仕入一覧（請求書）<span class="count">${plInvoices(view.month).length}</span></button>` +
+      `<button type="button" role="tab" id="tab-wage" aria-selected="${view.ledger === 'wage'}" data-k="wage">給与（合計）<span class="count">${state.wage?.[view.month] ? '済' : '未'}</span></button>`;
   }
 
   function renderStatus() {
@@ -562,7 +564,8 @@ footer { font-size: 12px; color: var(--ink-soft); display: grid; gap: 4px; }
     $('chips').innerHTML =
       `<span class="chip">現金残高 <b>${yen(cashEnd)}</b></span>` +
       `<span class="chip">売上精算の支払金額 <b>${srPay === null ? '—' : yen(srPay)}</b></span>` +
-      `<span class="chip">仕入の請求額 <b>${yen(plSum)}</b></span>`;
+      `<span class="chip">仕入の請求額 <b>${yen(plSum)}</b></span>` +
+      `<span class="chip">給与の差引支給額 <b>${state.wage?.[m] ? yen(wageCalc(state.wage[m]).net) : '—'}</b></span>`;
     const st = $('monthState');
     const ms = bookStatus(m, curBook());
     st.className = 'pill ' + ms.cls;
@@ -1015,6 +1018,7 @@ tfoot td { font-weight: bold; }
     if (t === 'doSubmitBook') {
       const bk = curBook(), m = view.month;
       if (bk === 'sr' && !state.sr[m]) { $('subMsg').textContent = '先に売上精算書を保存してください。'; return; }
+      if (bk === 'wage' && !state.wage?.[m]) { $('subMsg').textContent = '先に給与を保存してください。'; return; }
       submitBook(m, bk);
       view.submitStep = null; save(); render(); return;
     }
@@ -1192,7 +1196,7 @@ tfoot td { font-weight: bold; }
       if (!(salesSplit(x).v10.inc + salesSplit(x).v8.inc)) return srMsg('売上を入力してください。');
       state.sr[view.month] = JSON.parse(JSON.stringify(x));
       if (reopened(view.month, 'sr')) addLog(view.month, `修正：売上精算書 支払金額 ${yen(srCalc(x, state.srSet, view.month).pay)}円`);
-      save(); renderTabs(); renderPay(); srMsg('保存しました。', true);
+      save(); renderTabs(); renderStatus(); renderPay(); srMsg('保存しました。', true);
     }
     if (e.target.id === 'srPrint') {
       try {
@@ -1597,7 +1601,7 @@ tr.sum td { font-weight: bold; border-top: 1.5px solid #000; border-bottom: 0; }
   $('plBox').addEventListener('change', e => {
     const t = e.target; if (!t.dataset.pl || !reopened(view.month, 'pl')) return;
     const sp = state.suppliers.find(x => x.id === t.dataset.pl);
-    addLog(view.month, `修正：仕入一覧 ${sp.name} 請求額 ${yen(plTotal(plInv(view.month, sp.id)))}円`); save(); renderTabs();
+    addLog(view.month, `修正：仕入一覧 ${sp.name} 請求額 ${yen(plTotal(plInv(view.month, sp.id)))}円`); save(); renderTabs(); renderStatus();
   });
   // 業者をCSVでまとめて登録する
   function csvRows(text) {
@@ -1738,6 +1742,89 @@ tfoot td { font-weight: bold; background: #f6f6f6; }
 </body></html>`;
   }
 
+  /* ---------- 給与（その月の合計） ---------- */
+
+  // 金額の欄：[キー, 名前, 説明]
+  const WAGE_PAY = [
+    ['base', '給与（通勤手当を除く支給額）', '基本給・残業代・各種手当などの合計'],
+    ['commute', '通勤手当', ''],
+    ['otherPay', 'その他の支給', '賞与や立替金の精算など（任意）'],
+  ];
+  const WAGE_DED = [
+    ['health', '健康保険'], ['care', '介護保険'], ['pension', '厚生年金'], ['emp', '雇用保険'],
+    ['meal', '食事代'], ['itax', '所得税'], ['rtax', '住民税'], ['otherDed', 'その他の控除'],
+  ];
+  function wageCalc(w) {
+    const n = k => fnum(w[k]);
+    const gross = WAGE_PAY.reduce((t, [k]) => t + n(k), 0);
+    const ded = WAGE_DED.reduce((t, [k]) => t + n(k), 0);
+    return { gross, ded, net: gross - ded };
+  }
+
+  function renderWage() {
+    const m = view.month, lock = locked(), dis = lock ? ' disabled' : '';
+    const w = view.wageDraft ||= { ...(state.wage[m] || { date: `${m}-25` }) };
+    $('ledgerTitle').textContent = `給与　${monthName(m)}分`;
+    $('ledgerHint').textContent = '給与明細の一人ひとりではなく、その月の全員分の合計を入力してください。';
+    const inp = (k, label, note) => `<label class="f" for="wg-${k}">${label}<input type="number" id="wg-${k}" data-wg="${k}" step="1" inputmode="numeric" value="${w[k] ?? ''}"${dis}>${note ? `<small style="color:var(--ink-soft)">${note}</small>` : ''}</label>`;
+    $('wageBox').innerHTML = `
+      <div class="sr-grid">
+        <div class="entry">
+          <h3>${lock ? 'この月の給与は提出済みのため直せません' : '入力する'}</h3>
+          <div class="sr-sec"><h4>支給日・人数</h4><div class="fields">
+            <label class="f" for="wg-date">支給日<input type="date" id="wg-date" data-wgs="date" value="${w.date || ''}"${dis}></label>
+            <label class="f" for="wg-people">人数（任意）<input type="number" id="wg-people" data-wg="people" min="0" step="1" inputmode="numeric" value="${w.people ?? ''}"${dis}></label>
+          </div></div>
+          <div class="sr-sec"><h4>支給（全員分の合計）</h4><div class="fields">${WAGE_PAY.map(([k, l, note]) => inp(k, l, note)).join('')}</div></div>
+          <div class="sr-sec"><h4>控除（全員分の合計）</h4><div class="fields">${WAGE_DED.map(([k, l]) => inp(k, l)).join('')}
+            <label class="f" for="wg-otherDedLabel">その他の控除の内容<input type="text" id="wg-otherDedLabel" data-wgs="otherDedLabel" value="${esc(w.otherDedLabel || '')}" placeholder="例：前払金の返済"${dis}></label></div></div>
+          <div class="sr-sec"><h4>振込</h4><div class="fields">
+            <label class="f" for="wg-paidDate">振込日（任意）<input type="date" id="wg-paidDate" data-wgs="paidDate" value="${w.paidDate || ''}"${dis}></label>
+            <label class="f" for="wg-paid">実際の振込額（任意）<input type="number" id="wg-paid" data-wg="paid" step="1" inputmode="numeric" value="${w.paid ?? ''}"${dis}><small style="color:var(--ink-soft)">現金で手渡しした分があれば、その分を除いた額</small></label>
+          </div></div>
+          <label class="f" for="wg-memo">メモ（任意）<input type="text" id="wg-memo" data-wgs="memo" value="${esc(w.memo || '')}"${dis}></label>
+          <div class="form-foot"><span class="msg" id="wgMsg" role="status"></span>${lock ? '' : '<button type="button" class="btn" id="wgSave">保存する</button>'}</div>
+        </div>
+        <div class="entry sr-calc"><h3>計算結果</h3><div class="table-box"><table id="wgCalc"></table></div></div>
+      </div>`;
+    updateWage();
+  }
+
+  function readWage() {
+    const w = view.wageDraft;
+    document.querySelectorAll('#wageBox [data-wg]').forEach(el => { w[el.dataset.wg] = el.value === '' ? undefined : Math.round(Number(el.value)); });
+    document.querySelectorAll('#wageBox [data-wgs]').forEach(el => { w[el.dataset.wgs] = el.value.trim() || undefined; });
+    return w;
+  }
+
+  function updateWage() {
+    const w = readWage(), c = wageCalc(w);
+    const row = (l, v, cls = '') => `<tr class="${cls}"><td>${l}</td><td class="num">${yen(v || 0)}</td></tr>`;
+    const diff = w.paid !== undefined ? w.paid - c.net : null;
+    $('wgCalc').innerHTML = `<tbody>
+      <tr class="sub"><td colspan="2">支給</td></tr>${WAGE_PAY.map(([k, l]) => fnum(w[k]) ? row(l.replace(/（.*）/, ''), w[k]) : '').join('')}
+      ${row('総支給額', c.gross, 'total')}
+      <tr class="sub"><td colspan="2">控除</td></tr>${WAGE_DED.map(([k, l]) => fnum(w[k]) ? row(k === 'otherDed' && w.otherDedLabel ? w.otherDedLabel : l, w[k]) : '').join('')}
+      ${row('控除の合計', c.ded, 'total')}
+      <tr class="grand"><td>差引支給額</td><td class="num">${yen(c.net)}</td></tr>
+      ${diff !== null ? `<tr><td>実際の振込額との差</td><td class="num${diff ? ' out' : ''}">${diff === 0 ? '0' : (diff > 0 ? '+' : '−') + yen(Math.abs(diff))}</td></tr>` : ''}
+    </tbody>`;
+  }
+
+  $('wageBox').addEventListener('input', () => updateWage());
+  $('wageBox').addEventListener('click', e => {
+    if (e.target.id !== 'wgSave' || locked()) return;
+    const w = readWage(), m = view.month, msgEl = $('wgMsg');
+    msgEl.className = 'msg';
+    if (!w.date) { msgEl.textContent = '支給日を入力してください。'; return; }
+    if (!wageCalc(w).gross) { msgEl.textContent = '支給の金額を入力してください。'; return; }
+    const clean = Object.fromEntries(Object.entries(w).filter(([, v]) => v !== undefined && v !== ''));
+    state.wage[m] = clean;
+    if (reopened(m, 'wage')) addLog(m, `修正：給与 総支給額 ${yen(wageCalc(clean).gross)}円`);
+    save(); renderTabs(); renderStatus();
+    msgEl.className = 'msg ok'; msgEl.textContent = '保存しました。';
+  });
+
   /* ---------- 年間一覧 ---------- */
 
   function bookStatus(m, bk) {
@@ -1745,7 +1832,7 @@ tfoot td { font-weight: bold; background: #f6f6f6; }
     if (lockedBook(m, bk)) return { cls: 'locked', label: reopened(m, bk) ? '再提出済み' : '提出済み' };
     if (m > thisYM) return { cls: 'none', label: '—' };
     if (reopened(m, bk)) return { cls: 'open', label: '修正中' };
-    const has = bk === 'cash' ? state.rows.cash.some(r => inMonth(r, m)) : bk === 'sr' ? !!state.sr[m] : plInvoices(m).length > 0;
+    const has = bk === 'cash' ? state.rows.cash.some(r => inMonth(r, m)) : bk === 'sr' ? !!state.sr[m] : bk === 'wage' ? !!state.wage?.[m] : plInvoices(m).length > 0;
     return has ? { cls: 'open', label: '入力中' } : { cls: 'none', label: '未入力' };
   }
   const fyStartOf = m => { const [y, mo] = m.split('-').map(Number); return ym(mo >= FY_START ? y : y - 1, FY_START); };
@@ -1791,10 +1878,11 @@ tfoot td { font-weight: bold; background: #f6f6f6; }
     if (year) { renderYear(); return; }
     $('monthLabel').textContent = monthName(view.month);
     const isCash = view.ledger === 'cash';
-    const isSR = view.ledger === 'sr', isPL = view.ledger === 'pl';
-    $('cashPanel').hidden = !isCash; $('entryForm').hidden = isCash || isSR || isPL;
-    $('srBox').hidden = !isSR; $('payBox').hidden = !isSR; $('plBox').hidden = !isPL; $('tableBox').hidden = isSR || isPL;
+    const isSR = view.ledger === 'sr', isPL = view.ledger === 'pl', isWage = view.ledger === 'wage';
+    $('cashPanel').hidden = !isCash; $('entryForm').hidden = isCash || isSR || isPL || isWage;
+    $('srBox').hidden = !isSR; $('payBox').hidden = !isSR; $('plBox').hidden = !isPL; $('wageBox').hidden = !isWage; $('tableBox').hidden = isSR || isPL || isWage;
     renderTabs(); renderStatus();
+    if (isWage) { renderWage(); renderSubmit(); return; }
     if (isPL) { renderPL(); renderSubmit(); return; }
     if (isSR) { renderSR(); renderPay(); renderSubmit(); return; }
     renderTable();
@@ -1803,7 +1891,7 @@ tfoot td { font-weight: bold; background: #f6f6f6; }
   }
 
   function msg(text, ok) { const el = $('formMsg'); el.textContent = text; el.className = 'msg' + (ok ? ' ok' : ''); }
-  function resetView() { view.editing = null; view.confirmDel = null; view.cashKind = null; view.draft = null; view.submitStep = null; view.countDraft = null; view.reqForm = false; view.srDraft = null; view.payEdit = null; view.payDel = null; view.plEdit = null; view.spDel = null; view.payDue = null; view.ppDel = null; msg(''); }
+  function resetView() { view.editing = null; view.confirmDel = null; view.cashKind = null; view.draft = null; view.submitStep = null; view.countDraft = null; view.reqForm = false; view.srDraft = null; view.payEdit = null; view.payDel = null; view.plEdit = null; view.spDel = null; view.payDue = null; view.ppDel = null; view.wageDraft = null; msg(''); }
 
   $('tabs').addEventListener('click', e => {
     const b = e.target.closest('button[data-k]'); if (!b) return;

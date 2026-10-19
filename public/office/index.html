@@ -190,6 +190,7 @@ html, body { margin: 0; }
     <button type="button" role="tab" id="tab-cash" data-book="cash" aria-selected="true">現金出納帳</button>
     <button type="button" role="tab" id="tab-sr" data-book="sr" aria-selected="false">売上精算書</button>
     <button type="button" role="tab" id="tab-pl" data-book="pl" aria-selected="false">仕入一覧</button>
+    <button type="button" role="tab" id="tab-wage" data-book="wage" aria-selected="false">給与</button>
   </nav>
 
   <p class="hint">赤い行は科目が未設定です。科目を選ぶと、同じ内容の取引には次回から自動で同じ科目が入ります。税区分は顧問先が入力した税率から自動で入ります。必要なら直してください。</p>
@@ -265,7 +266,7 @@ html, body { margin: 0; }
       cash: (md(THIS).rows || []),
       cashOpening: (master.opening?.cash || 0) + all.filter(r => r.date < `${THIS}-01`).reduce((t, r) => t + (r.in || 0) - (r.out || 0), 0),
       srSet: master.srSet || {}, suppliers: master.suppliers || [],
-      sr: pick('sr'), srPaid: pick('srPaid'), inv: pick('inv'), plPaid: pick('plPaid'), month: md(THIS),
+      sr: pick('sr'), srPaid: pick('srPaid'), inv: pick('inv'), plPaid: pick('plPaid'), wage: pick('wage'), month: md(THIS),
     };
   }
 
@@ -293,7 +294,7 @@ html, body { margin: 0; }
   // JDLの課区・税区 → 上の税区分（過去の仕訳から覚えるときに使う）
   const TAX_FROM_JDL = { '31/10': 'p10', '31/9': 'p8', '31/70': 'p8n', '31/71': 'p10n', '34/': 'n34', '/': '0', '0/': '0', '11/10': 's10', '11/9': 's8' };
   const CASH = '111', BANK = '130', FUKUGO = '997', URIKAKE = '162', KAIKAKE = '312';
-  const BOOKS = { cash: '現金出納帳', sr: '売上精算書', pl: '仕入一覧' };
+  const BOOKS = { cash: '現金出納帳', sr: '売上精算書', pl: '仕入一覧', wage: '給与' };
 
   function defaultOffice(name) {
     return {
@@ -462,6 +463,31 @@ html, body { margin: 0; }
           else out.push({ key: `srpay:${m}:${p.id}`, date: p.date, dr: BANK, cr: URIKAKE, amt: p.amount, tax: '0', desc: '売上精算:入金', tekiyo: `${Number(mo)}月分売上精算 入金`, src: '入金確認' });
           // 「これで終わり」にした入金で、予定額に足りない分は差額（振込手数料など）にする
           if (p.close && plan > sum) out.push({ key: `srdiff:${m}`, date: p.date, need: 'dr', cr: URIKAKE, amt: plan - sum, tax: 'p10', desc: '売上精算:入金差額', tekiyo: `${Number(mo)}月分売上精算 入金差額`, src: '予定額との差（振込手数料など）' });
+        }
+      }
+    } else if (which === 'wage') {
+      // 給与（全員分の合計）：これまでのJDLの仕訳と同じく、支給日に 給料手当・旅費交通／未払費用、
+      // 控除は 未払費用／法定福利・従食売上・預り金。振込は 未払費用／普通預金
+      const w = CLIENT.wage[THIS];
+      if (w) {
+        const d = w.date || END, h = `${M}月度給与`, n = k => Number(w[k]) || 0;
+        const add = (k, j) => { if (n(k)) out.push({ key: `wage:${k}`, date: d, amt: n(k), src: '給与（合計）', ...j }); };
+        add('base', { dr: '621', cr: '318', tax: '0', tekiyo: h });
+        add('commute', { dr: '636', cr: '318', tax: 'p10', tekiyo: `${h}・通勤手当` });
+        add('otherPay', { need: 'dr', cr: '318', tax: '0', desc: '給与:その他の支給', def: '621', tekiyo: `${h}・その他の支給` });
+        add('health', { dr: '318', cr: '627', tax: 'n34', tekiyo: `${h}控除・健康保険` });
+        add('care', { dr: '318', cr: '627', tax: 'n34', tekiyo: `${h}控除・介護保険` });
+        add('pension', { dr: '318', cr: '627', tax: 'n34', tekiyo: `${h}控除・厚生年金` });
+        add('emp', { dr: '318', cr: '627', tax: 'n34', tekiyo: `${h}控除・雇用保険` });
+        add('meal', { dr: '318', cr: '412', tax: 's10', tekiyo: `${h}控除・食事代` });
+        add('itax', { dr: '318', cr: '323', tax: '0', tekiyo: `${h}控除・所得税` });
+        add('rtax', { dr: '318', cr: '324', tax: '0', tekiyo: `${h}控除・住民税` });
+        add('otherDed', { dr: '318', need: 'cr', tax: '0', desc: '給与:その他の控除', def: '174', tekiyo: `${h}控除・${w.otherDedLabel || 'その他'}` });
+        if (state.settings.withPay) {
+          const gross = n('base') + n('commute') + n('otherPay');
+          const ded = ['health', 'care', 'pension', 'emp', 'meal', 'itax', 'rtax', 'otherDed'].reduce((t, k) => t + n(k), 0);
+          const paid = w.paid !== undefined ? n('paid') : gross - ded;
+          if (paid) out.push({ key: 'wage:pay', date: w.paidDate || d, dr: '318', cr: BANK, amt: paid, tax: '0', tekiyo: `${h}（給与資金）`, src: '給与の振込' });
         }
       }
     } else {

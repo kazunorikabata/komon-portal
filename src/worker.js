@@ -93,8 +93,8 @@ const same = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
 
 // 顧問先が月のデータを書き換えるときの決まり（事務所は対象外）
 // 提出は帳簿ごと。提出済みの帳簿の中身は直せない。入金・支払の記録、修正依頼、履歴はいつでも足せる
-const BOOK_FIELDS = { cash: ['rows', 'count'], sr: ['sr'], pl: ['inv'] };
-const BOOK_NAMES = { cash: '現金出納帳', sr: '売上精算書', pl: '仕入一覧' };
+const BOOK_FIELDS = { cash: ['rows', 'count'], sr: ['sr'], pl: ['inv'], wage: ['wage'] };
+const BOOK_NAMES = { cash: '現金出納帳', sr: '売上精算書', pl: '仕入一覧', wage: '給与' };
 // 以前の「月まとめて」の提出（文字列）は、3つとも提出済みとみなす
 const subMap = v => typeof v === 'string' ? { cash: v, sr: v, pl: v } : (v && typeof v === 'object' ? v : {});
 
