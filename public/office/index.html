@@ -438,11 +438,13 @@ html, body { margin: 0; }
   const acctOptions = sel => `<option value="">科目を選ぶ</option>` + state.accts.map(a => `<option value="${a.code}"${a.code === sel ? ' selected' : ''}>${a.code} ${esc(a.name)}</option>`).join('');
   const fixedCell = code => `<span class="fixed"><code>${code}</code>${esc(acct(code)?.name || '？')}</span>`;
 
+  // 提出は帳簿ごと。以前の「月まとめて」の提出（文字列）は3つとも提出済みとみなす
+  const subMap = v => typeof v === 'string' ? { cash: v, sr: v, pl: v } : (v && typeof v === 'object' ? v : {});
   function monthState() {
-    const d = CLIENT.month;
-    if ((d.requests || []).some(r => r.status === 'pending')) return { cls: 'req', label: '修正依頼あり' };
-    if (d.submitted) return { cls: '', label: `顧問先から提出済み（${d.submitted}）` };
-    return { cls: 'none', label: '未提出' };
+    const d = CLIENT.month, sub = subMap(d.submitted);
+    if ((d.requests || []).some(r => r.status === 'pending' && (!r.book || r.book === book))) return { cls: 'req', label: `${BOOKS[book]}：修正依頼あり` };
+    if (sub[book]) return { cls: '', label: `${BOOKS[book]}：顧問先から提出済み（${sub[book]}）` };
+    return { cls: 'none', label: `${BOOKS[book]}：未提出` };
   }
 
   function render() {
@@ -607,8 +609,8 @@ html, body { margin: 0; }
     const pend = [];
     for (const [k, d] of Object.entries(docs)) if (k.startsWith('m:')) (d.data.requests || []).forEach((r, i) => { if (r.status === 'pending') pend.push({ m: k.slice(2), i, r }); });
     $('reqSummary').textContent = current ? `修正依頼（承認待ち ${pend.length}件）` : '修正依頼';
-    $('reqList').innerHTML = !current ? '<p class="hint">顧問先を選んでください。</p>' : pend.length ? `<div class="table-box"><table><thead><tr><th>月</th><th>依頼の内容</th><th>依頼日時</th><th></th></tr></thead><tbody>${pend.map(p =>
-      `<tr><td>${Number(p.m.slice(5))}月分</td><td>${esc(p.r.reason)}</td><td>${esc(p.r.at)}</td><td><button type="button" class="btn" data-approve="${p.m}" data-idx="${p.i}">承認してロックを外す</button></td></tr>`).join('')}</tbody></table></div>` : '<p class="hint">承認待ちの依頼はありません。</p>';
+    $('reqList').innerHTML = !current ? '<p class="hint">顧問先を選んでください。</p>' : pend.length ? `<div class="table-box"><table><thead><tr><th>月</th><th>帳簿</th><th>依頼の内容</th><th>依頼日時</th><th></th></tr></thead><tbody>${pend.map(p =>
+      `<tr><td>${Number(p.m.slice(5))}月分</td><td>${p.r.book ? BOOKS[p.r.book] : 'すべて'}</td><td>${esc(p.r.reason)}</td><td>${esc(p.r.at)}</td><td><button type="button" class="btn" data-approve="${p.m}" data-idx="${p.i}">承認してロックを外す</button></td></tr>`).join('')}</tbody></table></div>` : '<p class="hint">承認待ちの依頼はありません。</p>';
     if (pend.length) $('reqBox').open = true;
   }
 
@@ -644,8 +646,11 @@ html, body { margin: 0; }
     const data = JSON.parse(JSON.stringify(doc.data));
     const r = data.requests[Number(b.dataset.idx)];
     r.status = 'approved'; r.doneAt = stamp();
-    delete data.submitted;
-    (data.log ||= []).push({ at: stamp(), text: '事務所が修正依頼を承認（ロック解除）', who: '事務所' });
+    // 依頼のあった帳簿だけロックを外す（帳簿の指定がない以前の依頼は、すべて外す）
+    const sub = subMap(data.submitted);
+    if (r.book) delete sub[r.book]; else for (const k of Object.keys(sub)) delete sub[k];
+    data.submitted = sub;
+    (data.log ||= []).push({ at: stamp(), text: `事務所が修正依頼を承認（${r.book ? BOOKS[r.book] : 'すべての帳簿'}のロック解除）`, who: '事務所' });
     try {
       const res = await api(`/api/office/clients/${current.id}/doc/${key}`, { method: 'PUT', body: JSON.stringify({ data, version: doc.version }) });
       docs[key] = { data, version: res.version };

@@ -98,7 +98,7 @@ h1 {
 .pill.none { background: transparent; color: var(--ink-soft); border: 1px dashed var(--rule); }
 .top-right { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; }
 #yearView { display: grid; gap: 12px; }
-#yearView table { min-width: 760px; }
+#yearView table { min-width: 980px; }
 #yearView tbody tr.clickable { cursor: pointer; }
 #yearView tbody tr.clickable:hover td { background: var(--accent-soft); }
 #yearView tr.current td:first-child { font-weight: 700; }
@@ -506,14 +506,20 @@ footer { font-size: 12px; color: var(--ink-soft); display: grid; gap: 4px; }
   const defDate = () => today.startsWith(view.month) ? today : `${view.month}-01`;
   const inMonth = (r, m) => r.date && r.date.startsWith(m);
   const sorted = rows => rows.slice().sort((a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : 0);
-  const locked = () => !!state.submitted[view.month];
-  const pendingReq = m => (state.requests[m] || []).find(r => r.status === 'pending');
-  const reopened = m => (state.requests[m] || []).some(r => r.status === 'approved');
+  // 提出は帳簿ごと（現金出納帳・売上精算書・仕入一覧）。以前の「月まとめて」の提出は3つとも提出済みとみなす
+  const BOOKS = { cash: '現金出納帳', sr: '売上精算書', pl: '仕入一覧' };
+  const subOf = m => { const v = state.submitted[m]; return typeof v === 'string' ? { cash: v, sr: v, pl: v } : (v || {}); };
+  const curBook = () => (BOOKS[view.ledger] ? view.ledger : 'cash');
+  const lockedBook = (m, b) => !!subOf(m)[b];
+  const locked = () => lockedBook(view.month, curBook());
+  const forBook = (r, b) => !r.book || r.book === b;
+  const pendingReq = (m, b = curBook()) => (state.requests[m] || []).find(r => r.status === 'pending' && forBook(r, b));
+  const reopened = (m, b = curBook()) => (state.requests[m] || []).some(r => r.status === 'approved' && forBook(r, b));
   const stamp = () => { const t = new Date(); return `${t.getMonth() + 1}月${t.getDate()}日 ${String(t.getHours()).padStart(2, '0')}:${String(t.getMinutes()).padStart(2, '0')}`; };
   function addLog(m, text, who) { (state.log[m] ||= []).push({ at: stamp(), text, ...(who && { who }) }); }
   // 修正依頼が承認された月は、直した内容を履歴に残す
   function logChange(m, action, ledger, r) {
-    if (!reopened(m)) return;
+    if (!reopened(m, 'cash')) return;
     const amt = r.in || r.out || r.amount || 0;
     addLog(m, `${action}：${LEDGERS[ledger].name} ${Number(r.date.slice(8))}日 ${r.desc || ''} ${yen(amt)}円`);
   }
@@ -551,9 +557,9 @@ footer { font-size: 12px; color: var(--ink-soft); display: grid; gap: 4px; }
       `<span class="chip">売上精算の支払金額 <b>${srPay === null ? '—' : yen(srPay)}</b></span>` +
       `<span class="chip">仕入の請求額 <b>${yen(plSum)}</b></span>`;
     const st = $('monthState');
-    const ms = monthStatus(m);
+    const ms = bookStatus(m, curBook());
     st.className = 'pill ' + ms.cls;
-    st.textContent = ms.cls === 'locked' ? `提出済み（${state.submitted[m]}）` : ms.label;
+    st.textContent = `${BOOKS[curBook()]}：${ms.cls === 'locked' ? `提出済み（${subOf(m)[curBook()]}）` : ms.label}`;
   }
 
   function renderTable() {
@@ -947,34 +953,45 @@ tfoot td { font-weight: bold; }
 
   function renderSubmit() {
     const bar = $('submitBar');
-    const m = view.month;
-    if (locked()) {
+    const m = view.month, bk = curBook(), name = BOOKS[bk];
+    if (lockedBook(m, bk)) {
       const c = state.counts[m];
-      const line = c ? `現金残高確認：${md(c.date)} ${esc(c.checker)}さんが確認、数えた現金 ${yen(countTotal(c))}円、差額 ${diffText(countTotal(c) - bookCashAt(c.date))}` : '';
-      const pend = pendingReq(m);
+      const line = bk === 'cash' && c ? `現金残高確認：${md(c.date)} ${esc(c.checker)}さんが確認、数えた現金 ${yen(countTotal(c))}円、差額 ${diffText(countTotal(c) - bookCashAt(c.date))}` : '';
+      const pend = pendingReq(m, bk);
       bar.className = 'submit-bar locked';
       let action;
       if (pend) action = `<div style="display:grid;gap:4px;justify-items:end"><span class="pill req">修正依頼中（事務所の確認待ち）</span></div>`;
-      else if (view.reqForm) action = `<div class="req-form"><label class="f" for="req-reason">直したい内容と理由<input type="text" id="req-reason" placeholder="例：15日の駐車場代を書き忘れていました"></label>
+      else if (view.reqForm) action = `<div class="req-form"><label class="f" for="req-reason">${name}で直したい内容と理由<input type="text" id="req-reason" placeholder="例：15日の駐車場代を書き忘れていました"></label>
         <div class="form-foot"><span class="msg" id="reqMsg" role="status"></span><div style="display:flex;gap:8px"><button type="button" class="btn ghost" id="reqCancel">やめる</button><button type="button" class="btn" id="reqSend">修正を依頼する</button></div></div></div>`;
-      else action = `<button type="button" class="btn ghost" id="reqOpen">修正を依頼する</button>`;
-      bar.innerHTML = `<div style="display:grid;gap:4px;min-width:0;flex:1 1 20em"><p>${monthName(m)}分は ${state.submitted[m]} に提出しました。事務所で確認します。</p>${line ? `<p style="font-size:13px;color:var(--ink-soft)">${line}</p>` : ''}
+      else action = `<button type="button" class="btn ghost" id="reqOpen">${name}の修正を依頼する</button>`;
+      bar.innerHTML = `<div style="display:grid;gap:4px;min-width:0;flex:1 1 20em"><p>${monthName(m)}分の${name}は ${subOf(m)[bk]} に提出しました。事務所で確認します。</p>${line ? `<p style="font-size:13px;color:var(--ink-soft)">${line}</p>` : ''}
         ${pend ? `<p style="font-size:13px">依頼した内容：${esc(pend.reason)}（${pend.at}）</p>` : ''}</div>${action}${historyHtml(m)}`;
-    } else if (view.submitStep === 'count') {
+    } else if (view.submitStep === 'count' && bk === 'cash') {
       const c = view.countDraft || state.counts[m] || { date: today.startsWith(m) ? today : monthEnd(m) };
       bar.className = 'submit-bar count';
       bar.innerHTML = `<h3>現金残高確認票　${monthName(m)}</h3>
-        <p>提出の前に、手元の現金を金種ごとに数えて入力してください。現金出納帳の残高と比べて差額を確認します。</p>
+        <p>現金出納帳を提出する前に、手元の現金を金種ごとに数えて入力してください。現金出納帳の残高と比べて差額を確認します。</p>
         ${countFields(c)}
         <div class="form-foot"><span class="msg" id="ccMsg" role="status"></span>
-          <div style="display:flex;gap:8px"><button type="button" class="btn ghost" id="cancelSubmit">戻る</button><button type="button" class="btn" id="doSubmit">この内容で提出する</button></div></div>`;
+          <div style="display:flex;gap:8px"><button type="button" class="btn ghost" id="cancelSubmit">戻る</button><button type="button" class="btn" id="doSubmit">この内容で現金出納帳を提出する</button></div></div>`;
       updateCount();
-    } else {
-      const n = ORDER.reduce((s, k) => s + state.rows[k].filter(r => inMonth(r, m)).length, 0);
+    } else if (view.submitStep === 'confirm' && bk !== 'cash') {
       bar.className = 'submit-bar';
-      const again = reopened(m) ? '修正依頼が承認されたので、直せる状態です。直し終わったら、もう一度提出してください。' : `${monthName(m)}分の記入が終わったら提出してください（現在 ${n} 件）。提出の前に、現金残高確認票を記入します。`;
-      bar.innerHTML = `<p style="flex:1 1 20em">${again}</p><button type="button" class="btn" id="askSubmit">${monthName(m)}分を${reopened(m) ? '再提出' : '提出'}する</button>${historyHtml(m)}`;
+      bar.innerHTML = `<p style="flex:1 1 20em">${monthName(m)}分の${name}を提出します。提出したあとは、修正を依頼しないと直せません（入金・振込の記録はいつでも入れられます）。</p>
+        <div style="display:grid;gap:4px;justify-items:end"><span class="msg" id="subMsg" role="status"></span><div style="display:flex;gap:8px"><button type="button" class="btn ghost" id="cancelSubmit">戻る</button><button type="button" class="btn" id="doSubmitBook">提出する</button></div></div>`;
+    } else {
+      const again = reopened(m, bk) ? `${name}の修正依頼が承認されたので、直せる状態です。直し終わったら、もう一度提出してください。`
+        : bk === 'cash' ? `${monthName(m)}分の現金出納帳の記入が終わったら提出してください（現在 ${state.rows.cash.filter(r => inMonth(r, m)).length} 件）。提出の前に、現金残高確認票を記入します。`
+        : `${monthName(m)}分の${name}の入力が終わったら提出してください。ほかの帳簿とは別に提出できます。`;
+      bar.className = 'submit-bar';
+      bar.innerHTML = `<p style="flex:1 1 20em">${again}</p><button type="button" class="btn" id="askSubmit">${monthName(m)}分の${name}を${reopened(m, bk) ? '再提出' : '提出'}する</button>${historyHtml(m)}`;
     }
+  }
+
+  function submitBook(m, bk) {
+    addLog(m, `${reopened(m, bk) ? '再提出' : '提出'}（${BOOKS[bk]}）`);
+    const dt = new Date();
+    state.submitted[m] = { ...subOf(m), [bk]: `${dt.getMonth() + 1}月${dt.getDate()}日` };
   }
 
   function historyHtml(m) {
@@ -987,7 +1004,13 @@ tfoot td { font-weight: bold; }
   $('submitBar').addEventListener('input', () => updateCount());
   $('submitBar').addEventListener('click', e => {
     const t = e.target.id;
-    if (t === 'askSubmit') { view.submitStep = 'count'; render(); $('cc-d10000')?.focus(); return; }
+    if (t === 'askSubmit') { view.submitStep = curBook() === 'cash' ? 'count' : 'confirm'; render(); $('cc-d10000')?.focus(); return; }
+    if (t === 'doSubmitBook') {
+      const bk = curBook(), m = view.month;
+      if (bk === 'sr' && !state.sr[m]) { $('subMsg').textContent = '先に売上精算書を保存してください。'; return; }
+      submitBook(m, bk);
+      view.submitStep = null; save(); render(); return;
+    }
     if (t === 'cancelSubmit') { updateCount(); view.submitStep = null; render(); return; }
     if (t === 'reqOpen') { view.reqForm = true; render(); $('req-reason').focus(); return; }
     if (t === 'reqCancel') { view.reqForm = false; render(); return; }
@@ -995,8 +1018,8 @@ tfoot td { font-weight: bold; }
       const reason = $('req-reason').value.trim();
       if (!reason) { $('reqMsg').textContent = '直したい内容と理由を入力してください。'; return; }
       const at = stamp();
-      (state.requests[view.month] ||= []).push({ reason, at, status: 'pending' });
-      addLog(view.month, `修正を依頼：${reason}`);
+      (state.requests[view.month] ||= []).push({ book: curBook(), reason, at, status: 'pending' });
+      addLog(view.month, `修正を依頼（${BOOKS[curBook()]}）：${reason}`);
       view.reqForm = false; save(); render(); return;
     }
     if (t !== 'doSubmit') return;
@@ -1009,9 +1032,7 @@ tfoot td { font-weight: bold; }
     if (diff !== 0 && !c.memo) return fail('差額があります。わかる範囲で理由を入力してください。わからなければ「不明」で構いません。');
     if (diff === 0) delete c.memo;
     state.counts[view.month] = c;
-    addLog(view.month, reopened(view.month) ? '再提出' : '提出');
-    const dt = new Date();
-    state.submitted[view.month] = `${dt.getMonth() + 1}月${dt.getDate()}日`;
+    submitBook(view.month, 'cash');
     view.submitStep = null; view.countDraft = null; view.editing = null; view.cashKind = null; view.draft = null;
     save(); render();
     $('submitBar').scrollIntoView({ block: 'nearest' });
@@ -1163,7 +1184,7 @@ tfoot td { font-weight: bold; }
       const x = readSR();
       if (!(salesSplit(x).v10.inc + salesSplit(x).v8.inc)) return srMsg('売上を入力してください。');
       state.sr[view.month] = JSON.parse(JSON.stringify(x));
-      if (reopened(view.month)) addLog(view.month, `修正：売上精算書 支払金額 ${yen(srCalc(x, state.srSet, view.month).pay)}円`);
+      if (reopened(view.month, 'sr')) addLog(view.month, `修正：売上精算書 支払金額 ${yen(srCalc(x, state.srSet, view.month).pay)}円`);
       save(); renderTabs(); renderPay(); srMsg('保存しました。', true);
     }
     if (e.target.id === 'srPrint') {
@@ -1515,7 +1536,7 @@ tr.sum td { font-weight: bold; border-top: 1.5px solid #000; border-bottom: 0; }
     if (e.target.id === 'pp-all') document.querySelectorAll('#plPayPanel [data-ppd]').forEach(el => { el.value = e.target.value; });
   });
   $('plBox').addEventListener('change', e => {
-    const t = e.target; if (!t.dataset.pl || !reopened(view.month)) return;
+    const t = e.target; if (!t.dataset.pl || !reopened(view.month, 'pl')) return;
     const sp = state.suppliers.find(x => x.id === t.dataset.pl);
     addLog(view.month, `修正：仕入一覧 ${sp.name} 請求額 ${yen(plTotal(plInv(view.month, sp.id)))}円`); save(); renderTabs();
   });
@@ -1613,12 +1634,13 @@ tfoot td { font-weight: bold; background: #f6f6f6; }
 
   /* ---------- 年間一覧 ---------- */
 
-  function monthStatus(m) {
-    if (pendingReq(m)) return { cls: 'req', label: '修正依頼中' };
-    if (state.submitted[m]) return { cls: 'locked', label: reopened(m) ? '再提出済み' : '提出済み' };
+  function bookStatus(m, bk) {
+    if (pendingReq(m, bk)) return { cls: 'req', label: '修正依頼中' };
+    if (lockedBook(m, bk)) return { cls: 'locked', label: reopened(m, bk) ? '再提出済み' : '提出済み' };
     if (m > thisYM) return { cls: 'none', label: '—' };
-    if (reopened(m)) return { cls: 'open', label: '修正中' };
-    return ORDER.some(k => state.rows[k].some(r => inMonth(r, m))) ? { cls: 'open', label: '入力中' } : { cls: 'none', label: '未入力' };
+    if (reopened(m, bk)) return { cls: 'open', label: '修正中' };
+    const has = bk === 'cash' ? state.rows.cash.some(r => inMonth(r, m)) : bk === 'sr' ? !!state.sr[m] : plInvoices(m).length > 0;
+    return has ? { cls: 'open', label: '入力中' } : { cls: 'none', label: '未入力' };
   }
   const fyStartOf = m => { const [y, mo] = m.split('-').map(Number); return ym(mo >= FY_START ? y : y - 1, FY_START); };
 
@@ -1628,15 +1650,14 @@ tfoot td { font-weight: bold; background: #f6f6f6; }
     const [sy] = start.split('-');
     $('monthLabel').textContent = `${sy}年度`;
     let h = `<div class="ledger-head"><h2>年間一覧　${monthName(months[0])}〜${monthName(months[11])}</h2><p>月を押すと、その月の帳簿が開きます。</p></div>
-      <div class="table-box"><table><thead><tr><th>月</th><th>状況</th><th class="num">件数</th><th class="num">現金 月末残高</th><th class="num">現金確認の差額</th><th class="num">売上精算の支払金額</th><th class="num">仕入の請求額</th></tr></thead><tbody>`;
+      <div class="table-box"><table><thead><tr><th>月</th><th>現金出納帳</th><th>売上精算書</th><th>仕入一覧</th><th class="num">件数</th><th class="num">現金 月末残高</th><th class="num">現金確認の差額</th><th class="num">売上精算の支払金額</th><th class="num">仕入の請求額</th></tr></thead><tbody>`;
     for (const m of months) {
-      const st = monthStatus(m);
       const future = m > thisYM;
       const n = ORDER.reduce((s, k) => s + state.rows[k].filter(r => inMonth(r, m)).length, 0);
       const c = state.counts[m];
       const diff = c ? countTotal(c) - bookCashAt(c.date) : null;
       h += `<tr class="clickable${m === thisYM ? ' current' : ''}" data-month="${m}" tabindex="0">
-        <td>${Number(m.slice(5))}月${m === thisYM ? '（今月）' : ''}</td><td><span class="pill ${st.cls}">${st.label}</span></td>
+        <td>${Number(m.slice(5))}月${m === thisYM ? '（今月）' : ''}</td>${Object.keys(BOOKS).map(bk => { const st = bookStatus(m, bk); return `<td><span class="pill ${st.cls}">${st.label}</span></td>`; }).join('')}
         <td class="num">${future ? '' : n}</td>
         <td class="num">${future ? '' : yen(openingFor('cash', shiftMonth(m, 1)))}</td>
         <td class="num${diff ? ' diff-bad' : ''}">${diff === null ? (future ? '' : '—') : diffText(diff)}</td>

@@ -92,9 +92,18 @@ async function putDoc(env, clientId, key, data, version, email) {
 const same = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
 
 // 顧問先が月のデータを書き換えるときの決まり（事務所は対象外）
+// 提出は帳簿ごと。提出済みの帳簿の中身は直せない。入金・支払の記録、修正依頼、履歴はいつでも足せる
+const BOOK_FIELDS = { cash: ['rows', 'count'], sr: ['sr'], pl: ['inv'] };
+const BOOK_NAMES = { cash: '現金出納帳', sr: '売上精算書', pl: '仕入一覧' };
+// 以前の「月まとめて」の提出（文字列）は、3つとも提出済みとみなす
+const subMap = v => typeof v === 'string' ? { cash: v, sr: v, pl: v } : (v && typeof v === 'object' ? v : {});
+
 function clientMonthRule(oldData, newData) {
   const o = oldData || {}, n = newData || {};
-  if (o.submitted && !n.submitted) return '提出済みの月の提出を取り消すことはできません。事務所に修正を依頼してください。';
+  const os = subMap(o.submitted), ns = subMap(n.submitted);
+  for (const b of Object.keys(os)) {
+    if (os[b] && ns[b] !== os[b]) return `提出済みの${BOOK_NAMES[b] || '帳簿'}の提出を取り消すことはできません。事務所に修正を依頼してください。`;
+  }
   // 修正依頼：追加だけ。承認は事務所しかできない
   const or = o.requests || [], nr = n.requests || [];
   if (nr.length < or.length || or.some((r, i) => !same(r, nr[i]))) return '修正依頼の記録は変えられません。';
@@ -102,12 +111,9 @@ function clientMonthRule(oldData, newData) {
   // 履歴：追加だけ
   const ol = o.log || [], nl = n.log || [];
   if (nl.length < ol.length || ol.some((r, i) => !same(r, nl[i]))) return '履歴は変えられません。';
-  if (o.submitted) {
-    // 提出済みの月で直せるのは、入金・支払の記録と、修正依頼・履歴だけ
-    const free = new Set(['srPaid', 'plPaid', 'requests', 'log']);
-    for (const k of new Set([...Object.keys(o), ...Object.keys(n)])) {
-      if (!free.has(k) && !same(o[k], n[k])) return 'この月は提出済みです。直すときは事務所に修正を依頼してください。';
-    }
+  // 提出済みの帳簿の中身
+  for (const [b, fields] of Object.entries(BOOK_FIELDS)) {
+    if (os[b] && fields.some(f => !same(o[f], n[f]))) return `${BOOK_NAMES[b]}は提出済みです。直すときは事務所に修正を依頼してください。`;
   }
   return null;
 }
