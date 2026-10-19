@@ -231,17 +231,20 @@ export default {
       const email = await verifiedEmail(request, env);
       if (!email) return withHeaders(fail(401, 'ログインしてください。'));
 
+      const isStaff = String(env.STAFF_EMAILS || '').toLowerCase().split(',').map(s => s.trim()).filter(Boolean).includes(email);
+
       // 事務所のページ
       if (sub === env.OFFICE_HOST) {
-        const staff = String(env.STAFF_EMAILS || '').toLowerCase().split(',').map(s => s.trim());
-        if (!staff.includes(email)) return withHeaders(new Response('このページを見る権限がありません。', { status: 403 }));
+        if (!isStaff) return withHeaders(new Response('このページを見る権限がありません。', { status: 403 }));
         if (url.pathname.startsWith('/api/')) return withHeaders(await officeApi(request, env, url, email));
         return withHeaders(await page(env, request, '/office/'));
       }
 
-      // 顧問先のページ：サブドメインの顧問先に、このメールが登録されているか
-      const client = await env.DB.prepare(`SELECT c.* FROM clients c JOIN members m ON m.client_id = c.id
-        WHERE c.subdomain = ? AND m.email = ?`).bind(sub, email).first();
+      // 顧問先のページ：事務所のスタッフはすべての顧問先に入れる。ほかは、その顧問先に登録されたメールだけ
+      const client = isStaff
+        ? await env.DB.prepare('SELECT * FROM clients WHERE subdomain = ?').bind(sub).first()
+        : await env.DB.prepare(`SELECT c.* FROM clients c JOIN members m ON m.client_id = c.id
+          WHERE c.subdomain = ? AND m.email = ?`).bind(sub, email).first();
       if (!client) return withHeaders(new Response('このページを見る権限がありません。', { status: 403 }));
       if (url.pathname.startsWith('/api/')) return withHeaders(await clientApi(request, env, url, email, client));
       // 顧問先ごとのひな形の画面を返す
