@@ -91,7 +91,7 @@ h1 {
   background: var(--sheet); border: 1px solid var(--rule); color: var(--ink-soft);
 }
 .chip b { color: var(--ink); font-weight: 500; font-family: var(--font-num); }
-.pill { padding: 3px 12px; border-radius: 999px; font-size: 13px; font-weight: 500; }
+.pill { padding: 3px 12px; border-radius: 999px; font-size: 13px; font-weight: 500; white-space: nowrap; }
 .pill.open { background: var(--accent-soft); color: var(--accent); }
 .pill.locked { background: var(--lock-bg); color: var(--lock-fg); }
 .pill.req { background: var(--warn-bg); color: var(--warn-fg); }
@@ -130,7 +130,11 @@ h1 {
 #plBox tr.noinv td { color: var(--ink-soft); }
 #plBox td.pp input[type=date] { width: 9.5em; }
 #plBox tr.grp td { background: color-mix(in srgb, var(--rule) 40%, transparent); font-size: 12px; font-weight: 500; letter-spacing: .06em; padding: 4px 8px; }
-.pl-sum { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; align-items: start; }
+.pl-sum { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 14px; align-items: start; }
+@media (max-width: 860px) { .pl-sum { grid-template-columns: minmax(0, 1fr); } }
+#plDue { min-width: 0; }
+#plDue th, #plDue td { padding: 7px 8px; }
+@media (max-width: 520px) { #plDue { font-size: 13px; } #plDue th, #plDue td { padding: 6px 5px; } }
 .pl-sum table { min-width: 0; }
 .pl-master summary { cursor: pointer; color: var(--accent); font-size: 14px; }
 .pl-master[open] { display: grid; gap: 12px; }
@@ -175,6 +179,7 @@ tr.total td { border-top: 1px solid var(--rule-red); border-bottom: 2px solid va
 .link-btn {
   background: none; border: 0; padding: 2px 4px; cursor: pointer; font: inherit; font-size: 13px;
   color: var(--accent); text-decoration: underline; text-underline-offset: 2px;
+  white-space: nowrap;
 }
 .link-btn.danger { color: var(--out); }
 .empty { padding: 28px 12px; text-align: center; color: var(--ink-soft); }
@@ -1475,11 +1480,13 @@ tr.sum td { font-weight: bold; border-top: 1.5px solid #000; border-bottom: 0; }
       duePaid[dd] = (duePaid[dd] || 0) + pp.total;
     }
     $('plFoot').innerHTML = `<tr class="total"><td></td><td>合計（${n}社）</td><td></td><td></td><td class="num">${yen(t.t10)}</td><td class="num">${yen(t.t8)}</td><td class="num">${yen(t.ot)}</td><td class="num">${yen(t.sum)}</td><td class="num">${yen(t.fee)}</td><td class="num">${yen(t.pay)}</td><td></td><td class="num">${yen(t.paidAmt)}</td><td class="num">${yen(t.paidFee)}</td><td></td><td></td></tr>`;
-    $('plDue').innerHTML = `<thead><tr><th>支払期日</th><th class="num">振込予定額</th><th class="num">支払った額<br><small>振込額＋手数料</small></th><th class="num">未払い</th><th></th></tr></thead><tbody>${Object.keys(due).sort().map(dd => `<tr><td class="date">${ymd(dd)}</td><td class="num">${yen(due[dd])}</td><td class="num">${yen(duePaid[dd] || 0)}</td>
-        <td class="num ${dueLeft[dd] && today > dd ? 'out' : ''}">${dueLeft[dd] ? yen(dueLeft[dd]) : '0'}</td>
-        <td><div style="display:grid;gap:4px;justify-items:start">${dueLeft[dd] ? (today > dd ? '<span class="pill late">期日を過ぎています</span>' : '') : '<span class="pill locked">支払済み</span>'}
-          <button type="button" class="link-btn" data-paydue="${dd}">${!dueLeft[dd] ? '支払の記録を見る' : duePaid[dd] ? '残りの支払を記録する' : 'まとめて支払済みにする'}</button></div></td></tr>`).join('') || '<tr><td colspan="5" class="empty">請求額を入れると出ます</td></tr>'}
-      <tr class="total"><td>合計</td><td class="num">${yen(t.pay)}</td><td class="num">${yen(t.paidAmt + t.paidFee)}</td><td class="num">${yen(t.left)}</td><td></td></tr></tbody>`;
+    $('plDue').innerHTML = `<thead><tr><th>支払期日</th><th class="num">振込予定額</th><th class="num">支払った額<br><small>振込額＋手数料</small></th><th class="num">未払い</th></tr></thead><tbody>${Object.keys(due).sort().map(dd => `<tr>
+        <td><div style="display:grid;gap:6px;justify-items:start"><span class="date">${ymd(dd)}</span>
+          ${dueLeft[dd] ? (today > dd ? '<span class="pill late">期日を過ぎています</span>' : '') : '<span class="pill locked">支払済み</span>'}
+          <button type="button" class="link-btn" data-paydue="${dd}">${!dueLeft[dd] ? '支払の記録を見る' : duePaid[dd] ? '残りの支払を記録する' : 'まとめて支払済みにする'}</button></div></td>
+        <td class="num">${yen(due[dd])}</td><td class="num">${yen(duePaid[dd] || 0)}</td>
+        <td class="num ${dueLeft[dd] && today > dd ? 'out' : ''}">${dueLeft[dd] ? yen(dueLeft[dd]) : '0'}</td></tr>`).join('') || '<tr><td colspan="4" class="empty">請求額を入れると出ます</td></tr>'}
+      <tr class="total"><td>合計</td><td class="num">${yen(t.pay)}</td><td class="num">${yen(t.paidAmt + t.paidFee)}</td><td class="num">${yen(t.left)}</td></tr></tbody>`;
     renderPayPanel();
     const end = monthEnd(m), prevEnd = monthEnd(shiftMonth(m, -1));
     const bal = sps.map(sp => ({ sp, prev: apBalance(sp.id, prevEnd), inv: plTotal(plInv(m, sp.id)), paid: apPaidIn(sp.id, m), end: apBalance(sp.id, end) }))
