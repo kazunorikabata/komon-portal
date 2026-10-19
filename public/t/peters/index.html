@@ -1381,12 +1381,15 @@ tr.sum td { font-weight: bold; border-top: 1.5px solid #000; border-bottom: 0; }
   const plTotal = o => (o.t10 || 0) + (o.t8 || 0) + (o.ot || 0);
   const plInvoices = m => (state.suppliers || []).filter(sp => plTotal(plInv(m, sp.id)) > 0);
   const plPay = (sp, o) => plTotal(o) ? plTotal(o) - (sp.fee || 0) : 0;
-  const plPaidOf = (m, sid) => ((state.plPaid || {})[m] || {})[sid] || {};
+  // 支払は1つの請求に何回かに分けて記録できる。以前の1件だけの記録も読めるようにする
+  const paysIn = v => !v ? [] : Array.isArray(v) ? v : v.date ? [{ id: 'p0', ...v }] : [];
+  const plPaysOf = (m, sid) => paysIn(((state.plPaid || {})[m] || {})[sid]);
+  const plPaidSum = (m, sid) => plPaysOf(m, sid).reduce((a, p) => ({ amt: a.amt + (p.amount || 0), fee: a.fee + (p.fee || 0), total: a.total + (p.amount || 0) + (p.fee || 0) }), { amt: 0, fee: 0, total: 0 });
   function plStatus(m, sp) {
     const o = plInv(m, sp.id); if (!plTotal(o)) return null;
-    const need = plTotal(o), p = plPaidOf(m, sp.id), got = p.date ? (p.amount || 0) + (p.fee || 0) : 0;
-    if (p.date && got >= need) return { cls: 'locked', label: '支払済み', need, got };
-    if (p.date && got > 0) return { cls: 'part', label: '一部支払い', need, got };
+    const need = plTotal(o), got = plPaidSum(m, sp.id).total;
+    if (got >= need) return { cls: 'locked', label: '支払済み', need, got };
+    if (got > 0) return { cls: today > dueOf(m, sp.site) ? 'late' : 'part', label: `一部支払い（残り ${yen(need - got)}円）`, need, got };
     if (today > dueOf(m, sp.site)) return { cls: 'late', label: '期日を過ぎています', need, got };
     return { cls: 'open', label: '未払い', need, got };
   }
@@ -1396,12 +1399,12 @@ tr.sum td { font-weight: bold; border-top: 1.5px solid #000; border-bottom: 0; }
   function apBalance(sid, endDate) {
     let bal = 0;
     for (const [m, inv] of Object.entries(state.inv || {})) if (monthEnd(m) <= endDate && inv[sid]) bal += plTotal(inv[sid]);
-    for (const ps of Object.values(state.plPaid || {})) { const p = ps[sid]; if (p?.date && p.date <= endDate) bal -= (p.amount || 0) + (p.fee || 0); }
+    for (const ps of Object.values(state.plPaid || {})) for (const p of paysIn(ps[sid])) if (p.date <= endDate) bal -= (p.amount || 0) + (p.fee || 0);
     return bal;
   }
   function apPaidIn(sid, m) {
     let t = 0;
-    for (const ps of Object.values(state.plPaid || {})) { const p = ps[sid]; if (p?.date?.startsWith(m)) t += (p.amount || 0) + (p.fee || 0); }
+    for (const ps of Object.values(state.plPaid || {})) for (const p of paysIn(ps[sid])) if (p.date.startsWith(m)) t += (p.amount || 0) + (p.fee || 0);
     return t;
   }
 
@@ -1457,25 +1460,25 @@ tr.sum td { font-weight: bold; border-top: 1.5px solid #000; border-bottom: 0; }
       const st = plStatus(m, sp);
       if ($(`pl-${sp.id}-st`)) {
         $(`pl-${sp.id}-st`).innerHTML = st ? `<span class="pill ${st.cls}">${st.label}</span>` : '';
-        const pp0 = plPaidOf(m, sp.id);
-        $(`pl-${sp.id}-pdate`).textContent = pp0.date ? ymd(pp0.date) : '';
-        $(`pl-${sp.id}-pamt`).textContent = pp0.date ? yen(pp0.amount || 0) : '';
-        $(`pl-${sp.id}-pfee`).textContent = pp0.date ? yen(pp0.fee || 0) : '';
+        const ps0 = plPaysOf(m, sp.id);
+        $(`pl-${sp.id}-pdate`).innerHTML = ps0.map(p => `<div>${ymd(p.date)}</div>`).join('');
+        $(`pl-${sp.id}-pamt`).innerHTML = ps0.map(p => `<div>${yen(p.amount || 0)}</div>`).join('');
+        $(`pl-${sp.id}-pfee`).innerHTML = ps0.map(p => `<div>${yen(p.fee || 0)}</div>`).join('');
       }
       if (!sum) continue;
-      const pp = plPaidOf(m, sp.id);
-      if (pp.date) { t.paidAmt += pp.amount || 0; t.paidFee += pp.fee || 0; }
+      const pp = plPaidSum(m, sp.id);
+      t.paidAmt += pp.amt; t.paidFee += pp.fee;
       t.left += Math.max(0, st.need - st.got);
       n++; for (const k of ['t10', 't8', 'ot']) t[k] += o[k] || 0;
       t.sum += sum; t.fee += sp.fee || 0; t.pay += pay;
       const dd = dueOf(m, sp.site); due[dd] = (due[dd] || 0) + pay; dueLeft[dd] = (dueLeft[dd] || 0) + Math.max(0, st.need - st.got);
-      if (pp.date) duePaid[dd] = (duePaid[dd] || 0) + (pp.amount || 0) + (pp.fee || 0);
+      duePaid[dd] = (duePaid[dd] || 0) + pp.total;
     }
     $('plFoot').innerHTML = `<tr class="total"><td></td><td>合計（${n}社）</td><td></td><td></td><td class="num">${yen(t.t10)}</td><td class="num">${yen(t.t8)}</td><td class="num">${yen(t.ot)}</td><td class="num">${yen(t.sum)}</td><td class="num">${yen(t.fee)}</td><td class="num">${yen(t.pay)}</td><td></td><td class="num">${yen(t.paidAmt)}</td><td class="num">${yen(t.paidFee)}</td><td></td><td></td></tr>`;
     $('plDue').innerHTML = `<thead><tr><th>支払期日</th><th class="num">振込予定額</th><th class="num">支払った額<br><small>振込額＋手数料</small></th><th class="num">未払い</th><th></th></tr></thead><tbody>${Object.keys(due).sort().map(dd => `<tr><td class="date">${ymd(dd)}</td><td class="num">${yen(due[dd])}</td><td class="num">${yen(duePaid[dd] || 0)}</td>
         <td class="num ${dueLeft[dd] && today > dd ? 'out' : ''}">${dueLeft[dd] ? yen(dueLeft[dd]) : '0'}</td>
         <td><div style="display:grid;gap:4px;justify-items:start">${dueLeft[dd] ? (today > dd ? '<span class="pill late">期日を過ぎています</span>' : '') : '<span class="pill locked">支払済み</span>'}
-          <button type="button" class="link-btn" data-paydue="${dd}">${dueLeft[dd] ? 'まとめて支払済みにする' : '支払を直す'}</button></div></td></tr>`).join('') || '<tr><td colspan="5" class="empty">請求額を入れると出ます</td></tr>'}
+          <button type="button" class="link-btn" data-paydue="${dd}">${!dueLeft[dd] ? '支払の記録を見る' : duePaid[dd] ? '残りの支払を記録する' : 'まとめて支払済みにする'}</button></div></td></tr>`).join('') || '<tr><td colspan="5" class="empty">請求額を入れると出ます</td></tr>'}
       <tr class="total"><td>合計</td><td class="num">${yen(t.pay)}</td><td class="num">${yen(t.paidAmt + t.paidFee)}</td><td class="num">${yen(t.left)}</td><td></td></tr></tbody>`;
     renderPayPanel();
     const end = monthEnd(m), prevEnd = monthEnd(shiftMonth(m, -1));
@@ -1535,20 +1538,28 @@ tr.sum td { font-weight: bold; border-top: 1.5px solid #000; border-bottom: 0; }
     if (box.dataset.for === dd && box.innerHTML) return;   // 入力中は描き直さない
     box.dataset.for = dd;
     const defDate = dd > today ? today : dd;
+    const open = list.filter(sp => plStatus(m, sp).got < plStatus(m, sp).need);
+    const paid = list.flatMap(sp => plPaysOf(m, sp.id).map(p => ({ sp, p })));
     box.innerHTML = `<div class="entry" style="border:2px solid var(--accent)">
       <h3>支払期日 ${ymd(dd)} の支払（${list.length}社）</h3>
-      <p style="margin:0;font-size:12px;color:var(--ink-soft)">実際に振り込んだ日・金額・手数料を入れて「支払済みにする」を押してください。最初は予定の金額が入っています。払っていない業者はチェックを外してください。</p>
+      ${open.length ? `<p style="margin:0;font-size:12px;color:var(--ink-soft)">実際に振り込んだ日・金額・手数料を入れて「支払を記録する」を押してください。最初は残りの金額が入っています。一部だけ払ったときは振込額を直してください。残りは、あとで同じように記録できます。払っていない業者はチェックを外してください。</p>
       <label class="f" for="pp-all" style="max-width:14em">振込日をまとめて入れる<input type="date" id="pp-all" value="${defDate}"></label>
-      <div class="table-box"><table style="min-width:640px"><thead><tr><th></th><th>業者名</th><th class="num">請求額</th><th class="num">振込予定額</th><th>振込日</th><th class="num">振込額</th><th class="num">振込手数料</th></tr></thead><tbody>
-      ${list.map(sp => { const o = plInv(m, sp.id), pp = plPaidOf(m, sp.id), st = plStatus(m, sp);
-        return `<tr><td><input type="checkbox" id="pp-${sp.id}-on" data-ppon="${sp.id}"${st.cls === 'locked' && !pp.date ? '' : ' checked'} aria-label="${esc(sp.name)}を支払済みにする"></td>
-          <td>${esc(sp.name)}</td><td class="num">${yen(plTotal(o))}</td><td class="num">${yen(plPay(sp, o))}</td>
-          <td><input type="date" id="pp-${sp.id}-date" data-ppd="${sp.id}" value="${pp.date || defDate}" style="width:10em"></td>
-          <td class="num"><input type="number" id="pp-${sp.id}-amt" min="0" step="1" inputmode="numeric" value="${pp.date ? pp.amount ?? '' : plPay(sp, o)}" style="width:8em"></td>
-          <td class="num"><input type="number" id="pp-${sp.id}-fee" min="0" step="1" inputmode="numeric" value="${pp.date ? pp.fee ?? 0 : sp.fee || 0}" style="width:6em"></td></tr>`; }).join('')}
-      </tbody><tbody id="ppTotal"></tbody></table></div>
+      <div class="table-box"><table style="min-width:720px"><thead><tr><th></th><th>業者名</th><th class="num">請求額</th><th class="num">支払済み</th><th class="num">残り</th><th>振込日</th><th class="num">振込額</th><th class="num">振込手数料</th></tr></thead><tbody>
+      ${open.map(sp => { const o = plInv(m, sp.id), st = plStatus(m, sp), left = st.need - st.got;
+        const fee = st.got ? 0 : (sp.fee || 0);   // 振込手数料（先方負担）は最初の支払のときだけ差し引く
+        return `<tr><td><input type="checkbox" id="pp-${sp.id}-on" data-ppon="${sp.id}" checked aria-label="${esc(sp.name)}の支払を記録する"></td>
+          <td>${esc(sp.name)}</td><td class="num">${yen(plTotal(o))}</td><td class="num">${st.got ? yen(st.got) : ''}</td><td class="num">${yen(left)}</td>
+          <td><input type="date" id="pp-${sp.id}-date" data-ppd="${sp.id}" value="${defDate}" style="width:10em"></td>
+          <td class="num"><input type="number" id="pp-${sp.id}-amt" min="0" step="1" inputmode="numeric" value="${Math.max(0, left - fee)}" style="width:8em"></td>
+          <td class="num"><input type="number" id="pp-${sp.id}-fee" min="0" step="1" inputmode="numeric" value="${fee}" style="width:6em"></td></tr>`; }).join('')}
+      </tbody><tbody id="ppTotal"></tbody></table></div>` : '<p style="margin:0">この期日の業者は、すべて支払済みです。</p>'}
+      ${paid.length ? `<details${open.length ? '' : ' open'}><summary style="cursor:pointer;color:var(--accent);font-size:14px">これまでの支払（${paid.length}件）</summary>
+        <div class="table-box" style="margin-top:8px"><table style="min-width:0"><thead><tr><th>業者名</th><th>振込日</th><th class="num">振込額</th><th class="num">振込手数料</th><th></th></tr></thead><tbody>
+        ${paid.map(({ sp, p }) => `<tr><td>${esc(sp.name)}</td><td class="date">${ymd(p.date)}</td><td class="num">${yen(p.amount || 0)}</td><td class="num">${yen(p.fee || 0)}</td>
+          <td><button type="button" class="link-btn danger" data-ppdel="${sp.id}|${p.id}">${view.ppDel === `${sp.id}|${p.id}` ? '本当に消す' : '消す'}</button></td></tr>`).join('')}
+        </tbody></table></div></details>` : ''}
       <div class="form-foot"><span class="msg" id="ppMsg" role="status"></span>
-        <div style="display:flex;gap:8px"><button type="button" class="btn ghost" id="ppCancel">やめる</button><button type="button" class="btn" id="ppSave">支払済みにする</button></div></div>
+        <div style="display:flex;gap:8px"><button type="button" class="btn ghost" id="ppCancel">閉じる</button>${open.length ? '<button type="button" class="btn" id="ppSave">支払を記録する</button>' : ''}</div></div>
     </div>`;
     updatePayTotal();
   }
@@ -1557,15 +1568,15 @@ tr.sum td { font-weight: bold; border-top: 1.5px solid #000; border-bottom: 0; }
   function updatePayTotal() {
     const box = $('ppTotal'); if (!box) return;
     const m = view.month;
-    let n = 0, inv = 0, plan = 0, amt = 0, fee = 0;
+    let n = 0, inv = 0, plan = 0, amt = 0, fee = 0, paidSoFar = 0;
     document.querySelectorAll('#plPayPanel [data-ppon]').forEach(el => {
       if (!el.checked) return;
       const sid = el.dataset.ppon, sp = state.suppliers.find(x => x.id === sid), o = plInv(m, sid);
-      n++; inv += plTotal(o); plan += plPay(sp, o);
+      n++; inv += plTotal(o); plan += plPay(sp, o); paidSoFar += plPaidSum(m, sid).total;
       amt += num($(`pp-${sid}-amt`).value) || 0; fee += num($(`pp-${sid}-fee`).value) || 0;
     });
-    box.innerHTML = `<tr class="total"><td></td><td>合計（${n}社）</td><td class="num">${yen(inv)}</td><td class="num">${yen(plan)}</td><td></td><td class="num">${yen(amt)}</td><td class="num">${yen(fee)}</td></tr>
-      <tr class="total"><td></td><td colspan="4">支払額の合計（振込額＋振込手数料）</td><td class="num" colspan="2">${yen(amt + fee)}</td></tr>`;
+    box.innerHTML = `<tr class="total"><td></td><td>合計（${n}社）</td><td class="num">${yen(inv)}</td><td class="num">${yen(paidSoFar)}</td><td class="num">${yen(inv - paidSoFar)}</td><td></td><td class="num">${yen(amt)}</td><td class="num">${yen(fee)}</td></tr>
+      <tr class="total"><td></td><td colspan="6">支払額の合計（振込額＋振込手数料）</td><td class="num" colspan="2">${yen(amt + fee)}</td></tr>`;
   }
 
   $('plBox').addEventListener('input', e => {
@@ -1633,8 +1644,15 @@ tr.sum td { font-weight: bold; border-top: 1.5px solid #000; border-bottom: 0; }
       else state.suppliers.push({ id: id(), ...rec });
       view.plEdit = null; save(); render(); return;
     }
-    if (t.dataset.paydue) { view.payDue = t.dataset.paydue; $('plPayPanel').dataset.for = ''; renderPayPanel(); $('pp-all')?.focus(); return; }
-    if (t.id === 'ppCancel') { view.payDue = null; renderPayPanel(); return; }
+    if (t.dataset.paydue) { view.payDue = t.dataset.paydue; view.ppDel = null; $('plPayPanel').dataset.for = ''; renderPayPanel(); $('pp-all')?.focus(); return; }
+    if (t.id === 'ppCancel') { view.payDue = null; view.ppDel = null; renderPayPanel(); return; }
+    if (t.dataset.ppdel) {
+      if (view.ppDel !== t.dataset.ppdel) { view.ppDel = t.dataset.ppdel; $('plPayPanel').dataset.for = ''; renderPayPanel(); return; }
+      const [sid, pid] = t.dataset.ppdel.split('|'), m = view.month;
+      const rest = plPaysOf(m, sid).filter(p => p.id !== pid);
+      if (rest.length) state.plPaid[m][sid] = rest; else delete state.plPaid[m][sid];
+      view.ppDel = null; save(); $('plPayPanel').dataset.for = ''; updatePL(); return;
+    }
     if (t.id === 'ppSave') {
       const m = view.month, ids = [...document.querySelectorAll('#plPayPanel [data-ppon]')].map(el => el.dataset.ppon);
       let n = 0;
@@ -1642,12 +1660,16 @@ tr.sum td { font-weight: bold; border-top: 1.5px solid #000; border-bottom: 0; }
         if (!$(`pp-${sid}-on`).checked) continue;
         const date = $(`pp-${sid}-date`).value;
         if (!date) { $('ppMsg').textContent = '振込日を入れてください。'; return; }
-        (((state.plPaid ||= {})[m] ||= {})[sid] = { date, amount: num($(`pp-${sid}-amt`).value) || 0, fee: num($(`pp-${sid}-fee`).value) || 0 });
+        const amount = num($(`pp-${sid}-amt`).value) || 0, fee = num($(`pp-${sid}-fee`).value) || 0;
+        if (!amount && !fee) continue;
+        const pm = ((state.plPaid ||= {})[m] ||= {});
+        pm[sid] = [...plPaysOf(m, sid), { id: id(), date, amount, fee }];
         n++;
       }
-      if (!n) { $('ppMsg').textContent = '支払済みにする業者にチェックを付けてください。'; return; }
+      if (!n) { $('ppMsg').textContent = '支払を記録する業者にチェックを付けて、振込額を入れてください。'; return; }
       view.payDue = null; save(); updatePL();
-      $('plMsg').className = 'msg ok'; $('plMsg').textContent = `${n}社を支払済みにしました。`;
+      const partial = ids.filter(sid => { const sp = state.suppliers.find(x => x.id === sid); const st = plStatus(m, sp); return st && st.got < st.need; }).length;
+      $('plMsg').className = 'msg ok'; $('plMsg').textContent = `${n}社の支払を記録しました。${partial ? `まだ残りがある業者が${partial}社あります。` : ''}`;
       return;
     }
     if (t.id === 'plPrint') {
@@ -1665,7 +1687,7 @@ tr.sum td { font-weight: bold; border-top: 1.5px solid #000; border-bottom: 0; }
       const o = plInv(m, sp.id), sum = plTotal(o);
       return `<tr${sum ? '' : ' class="no"'}><td>${esc(sp.cat)}</td><td>${esc(sp.no)}</td><td class="nm">${esc(sp.name)}</td><td>${esc(sp.site)}</td><td>${esc(sp.bank)}</td><td>${esc(sp.branch)}</td><td>${esc(sp.type)}</td><td>${esc(sp.acct)}</td>
         <td>${ymd(dueOf(m, sp.site))}</td><td class="n">${o.t10 ? yen(o.t10) : ''}</td><td class="n">${o.t8 ? yen(o.t8) : ''}</td><td class="n">${o.ot ? yen(o.ot) : ''}</td>
-        <td class="n b">${sum ? '¥' + yen(sum) : ''}</td><td class="n">${sum ? '¥' + yen(sp.fee || 0) : ''}</td><td class="n b">${sum ? yen(plPay(sp, o)) : '0'}</td><td>${plPaidOf(m, sp.id).date ? ymd(plPaidOf(m, sp.id).date) : ''}</td><td class="n">${plPaidOf(m, sp.id).date ? yen(plPaidOf(m, sp.id).amount || 0) : ''}</td><td class="n">${plPaidOf(m, sp.id).date ? yen(plPaidOf(m, sp.id).fee || 0) : ''}</td></tr>`;
+        <td class="n b">${sum ? '¥' + yen(sum) : ''}</td><td class="n">${sum ? '¥' + yen(sp.fee || 0) : ''}</td><td class="n b">${sum ? yen(plPay(sp, o)) : '0'}</td><td>${plPaysOf(m, sp.id).map(p => ymd(p.date)).join('<br>')}</td><td class="n">${plPaysOf(m, sp.id).map(p => yen(p.amount || 0)).join('<br>')}</td><td class="n">${plPaysOf(m, sp.id).map(p => yen(p.fee || 0)).join('<br>')}</td></tr>`;
     }).join('');
     const tt = new Date();
     return `<!doctype html><html lang="ja"><head><meta charset="utf-8"><title>仕入一覧 ${monthName(m)}締め</title>
@@ -1771,7 +1793,7 @@ tfoot td { font-weight: bold; background: #f6f6f6; }
   }
 
   function msg(text, ok) { const el = $('formMsg'); el.textContent = text; el.className = 'msg' + (ok ? ' ok' : ''); }
-  function resetView() { view.editing = null; view.confirmDel = null; view.cashKind = null; view.draft = null; view.submitStep = null; view.countDraft = null; view.reqForm = false; view.srDraft = null; view.payEdit = null; view.payDel = null; view.plEdit = null; view.spDel = null; view.payDue = null; msg(''); }
+  function resetView() { view.editing = null; view.confirmDel = null; view.cashKind = null; view.draft = null; view.submitStep = null; view.countDraft = null; view.reqForm = false; view.srDraft = null; view.payEdit = null; view.payDel = null; view.plEdit = null; view.spDel = null; view.payDue = null; view.ppDel = null; msg(''); }
 
   $('tabs').addEventListener('click', e => {
     const b = e.target.closest('button[data-k]'); if (!b) return;

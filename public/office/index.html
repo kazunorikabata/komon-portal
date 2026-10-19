@@ -389,6 +389,9 @@ html, body { margin: 0; }
   // 売上精算書の入金（何回かに分かれることがある）。以前の1件だけの記録は、それで入金が終わったものとして扱う
   const srPays = m => { const v = CLIENT.srPaid[m]; return !v ? [] : Array.isArray(v) ? v : [{ id: 'p0', ...v, close: true }]; };
 
+  // 仕入の支払（1つの請求に何回かに分かれることがある）。以前の1件だけの記録も読む
+  const plPays = (m, sid) => { const v = (CLIENT.plPaid[m] || {})[sid]; return !v ? [] : Array.isArray(v) ? v : v.date ? [{ id: 'p0', ...v }] : []; };
+
   // 月末残高（このしくみで記録した分）
   function balances() {
     const cash = CLIENT.cashOpening + CLIENT.cash.reduce((t, r) => t + (r.in || 0) - (r.out || 0), 0);
@@ -400,8 +403,7 @@ html, body { margin: 0; }
     const ap = [];
     for (const [m, inv] of Object.entries(CLIENT.inv)) if (m <= THIS) for (const [sid, o] of Object.entries(inv)) {
       const total = (o.t10 || 0) + (o.t8 || 0) + (o.ot || 0);
-      const p = (CLIENT.plPaid[m] || {})[sid];
-      const got = p && p.date <= END ? (p.amount || 0) + (p.fee || 0) : 0;
+      const got = plPays(m, sid).filter(p => p.date <= END).reduce((t, p) => t + (p.amount || 0) + (p.fee || 0), 0);
       if (total - got > 0) ap.push({ m, name: CLIENT.suppliers.find(x => x.id === sid)?.name || sid, left: total - got });
     }
     return { cash, ar, ap };
@@ -470,11 +472,11 @@ html, body { margin: 0; }
         for (const k of ks) out.push({ key: `pl:${sp.id}:${k}`, date: END, need: 'dr', cr: KAIKAKE, amt: o[k], tax: BT[k][0], desc: `仕入:${sp.name}`, def: '431',
           tekiyo: ks.length > 1 ? `${sp.name}・${BT[k][1]}部分` : sp.name, src: `${M}月締めの請求書` });
       }
-      if (state.settings.withPay) for (const [m, ps] of Object.entries(CLIENT.plPaid)) for (const [sid, p] of Object.entries(ps)) {
+      if (state.settings.withPay) for (const [m, ps] of Object.entries(CLIENT.plPaid)) for (const sid of Object.keys(ps)) for (const p of plPays(m, sid)) {
         if (!p.date.startsWith(THIS)) continue;
-        const sp = CLIENT.suppliers.find(x => x.id === sid), [, mo] = m.split('-');
-        out.push({ key: `plpay:${m}:${sid}`, date: p.date, dr: KAIKAKE, cr: BANK, amt: p.amount, tax: '0', desc: '仕入:支払', tekiyo: `${sp.name} ${Number(mo)}月分 支払`, src: '仕入一覧の振込' });
-        if (p.fee) out.push({ key: `plfee:${m}:${sid}`, date: p.date, dr: KAIKAKE, cr: BANK, amt: p.fee, tax: '0', desc: '仕入:振込手数料', tekiyo: `${sp.name} 振込手数料（先方負担）`, src: '仕入一覧の振込' });
+        const sp = CLIENT.suppliers.find(x => x.id === sid) || { name: sid }, [, mo] = m.split('-');
+        out.push({ key: `plpay:${m}:${sid}:${p.id}`, date: p.date, dr: KAIKAKE, cr: BANK, amt: p.amount, tax: '0', desc: '仕入:支払', tekiyo: `${sp.name} ${Number(mo)}月分 支払`, src: '仕入一覧の振込' });
+        if (p.fee) out.push({ key: `plfee:${m}:${sid}:${p.id}`, date: p.date, dr: KAIKAKE, cr: BANK, amt: p.fee, tax: '0', desc: '仕入:振込手数料', tekiyo: `${sp.name} 振込手数料（先方負担）`, src: '仕入一覧の振込' });
       }
     }
     // 事務所の設定（上書き・覚えた科目）を重ねる
