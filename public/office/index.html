@@ -198,15 +198,17 @@ html, body { margin: 0; }
   <div class="two">
     <section class="panel">
       <h2>JDL取込用CSV</h2>
-      <div class="fields">
+      <label class="check" for="s-withHeader"><input type="checkbox" id="s-withHeader">先頭に会社情報（商号コード・商号名・決算年月日・会計処理方法）の4行を付ける</label>
+      <div class="fields" id="headerFields">
         <label class="f" for="s-code">商号コード<input type="text" id="s-code" inputmode="numeric"></label>
         <label class="f" for="s-name">商号名<input type="text" id="s-name"></label>
         <label class="f" for="s-fy">決算年月日<input type="text" id="s-fy" placeholder="例：令和9年3月31日"></label>
       </div>
-      <div class="fields">
-        <label class="f" for="s-skc">課税売上の課区（コード）<input type="text" id="s-skc" inputmode="numeric" placeholder="JDLの設定を確認"></label>
-        <label class="f" for="s-skn">課税売上の課区（名称）<input type="text" id="s-skn" placeholder="JDLの設定を確認"></label>
-      </div>
+      <details><summary class="hint">課税売上の課区（ふつうは変えなくて大丈夫です）</summary>
+      <div class="fields" style="margin-top:8px">
+        <label class="f" for="s-skc">課税売上の課区（コード）<input type="text" id="s-skc" inputmode="numeric"></label>
+        <label class="f" for="s-skn">課税売上の課区（名称）<input type="text" id="s-skn"></label>
+      </div></details>
       <label class="check" for="s-withPay"><input type="checkbox" id="s-withPay">入金・支払（預金）の仕訳も出す</label>
       <p class="hint" style="margin-top:-6px">売上精算書の入金や仕入の振込を通帳から別に入力している場合は、二重にならないようチェックを外したままにしてください。</p>
       <div class="foot">
@@ -214,7 +216,7 @@ html, body { margin: 0; }
         <button type="button" class="btn" id="exportBtn">CSVを保存する</button>
       </div>
       <pre class="preview" id="preview" aria-label="CSVの中身（先頭）"></pre>
-      <p class="hint">Shift-JIS・改行CRLFで、いただいたJDLの仕訳一覧と同じ並びで書き出します。</p>
+      <p class="hint">Shift-JIS・改行CRLFで、JDLの仕訳一覧と同じ並びで書き出します。</p>
     </section>
 
     <section class="panel">
@@ -227,6 +229,12 @@ html, body { margin: 0; }
         <button type="button" class="btn ghost" id="a-add">追加</button>
       </div>
       <span class="msg" id="acctMsg" role="status"></span>
+      <div style="display:grid;gap:6px;border-top:1px solid var(--rule);padding-top:12px">
+        <h3>過去の仕訳から覚える</h3>
+        <p class="hint">JDLから書き出した仕訳一覧のCSVを選ぶと、現金の取引の摘要と科目・税区分の組み合わせを覚えます。使われている科目も科目一覧に足します。顧問先の入力と摘要が同じか似ていれば、科目が自動で入ります。</p>
+        <label class="f" for="learnFile">仕訳一覧のCSV（Shift-JIS）<input type="file" id="learnFile" accept=".csv,text/csv"></label>
+        <span class="msg" id="learnMsg" role="status"></span>
+      </div>
     </section>
   </div>
 
@@ -261,30 +269,46 @@ html, body { margin: 0; }
     };
   }
 
+  // JDLの仕訳で使われている科目（ピータース様の1年分の仕訳から）。「税なし」は選ぶと課区が対象外になる科目
   const DEFAULT_ACCTS = [
-    ['111', '現金'], ['130', '普通１'], ['162', '売掛金'], ['312', '買掛金'], ['318', '未払費用'], ['341', '長期未払'],
-    ['431', '仕入１'], ['621', '給料手当', true], ['627', '法定福利', true], ['631', '賃借料'], ['634', '消耗品費'],
-    ['636', '旅費交通'], ['637', '手数料'], ['640', '保険料', true], ['641', '通信費'], ['642', '諸会費', true],
-    ['646', '衛生費'], ['648', '顧問料'], ['997', '複合', true],
+    ['111', '現金'], ['130', '普通１'], ['162', '売掛金'], ['174', '仮払金', true], ['190', '商品', true],
+    ['312', '買掛金'], ['318', '未払費用'], ['323', '預り金', true], ['324', '預り金２', true], ['341', '長期未払'],
+    ['410', '売上高１'], ['411', '業務売上'], ['412', '従食売上'], ['413', '社販売上'],
+    ['431', '仕入１'], ['611', '出店料'], ['612', '荷造運賃'], ['621', '給料手当', true], ['626', '外注人件'], ['627', '法定福利', true], ['628', '厚生費'],
+    ['631', '賃借料'], ['632', '修繕費'], ['634', '消耗品費'], ['635', '水道光熱'], ['636', '旅費交通'], ['637', '手数料'],
+    ['638', '租税公課', true], ['640', '保険料'], ['641', '通信費'], ['642', '諸会費', true], ['646', '衛生費'], ['648', '顧問料'], ['655', '雑費'],
+    ['810', '受取利息', true], ['819', '雑収入'], ['997', '諸口', true],
   ].map(([code, name, noTax]) => ({ code, name, noTax: !!noTax }));
 
   const TAXES = {
     '0':  { label: '対象外', ku: '0', kuName: '対象外', zei: '', zeiName: '' },
     p10: { label: '課税仕入 10%', ku: '31', kuName: '仕入対課税売上', zei: '10', zeiName: '税率１０％' },
     p8:  { label: '課税仕入 8%（軽減）', ku: '31', kuName: '仕入対課税売上', zei: '9', zeiName: '軽減税率８％' },
+    p8n: { label: '課税仕入 8%（インボイスなし・80%控除）', ku: '31', kuName: '仕入対課税売上', zei: '70', zeiName: '軽減 8%免80' },
+    n34: { label: '非課税仕入', ku: '34', kuName: '非課税仕入', zei: '', zeiName: '' },
     s10: { label: '課税売上 10%', sales: true, zei: '10', zeiName: '税率１０％' },
     s8:  { label: '課税売上 8%（軽減）', sales: true, zei: '9', zeiName: '軽減税率８％' },
   };
+  // JDLの課区・税区 → 上の税区分（過去の仕訳から覚えるときに使う）
+  const TAX_FROM_JDL = { '31/10': 'p10', '31/9': 'p8', '31/70': 'p8n', '34/': 'n34', '/': '0', '0/': '0', '11/10': 's10', '11/9': 's8' };
   const CASH = '111', BANK = '130', FUKUGO = '997', URIKAKE = '162', KAIKAKE = '312';
   const BOOKS = { cash: '現金出納帳', sr: '売上精算書', pl: '仕入一覧' };
 
   function defaultOffice(name) {
     return {
       accts: DEFAULT_ACCTS.map(a => ({ ...a })),
-      rules: { '売上精算:出店料': '631', '売上精算:テナント料': '631', '売上精算:事務手数料': '637', '売上精算:入金差額': '637' },
+      rules: { '売上精算:入金差額': '637' },
+      taxRules: {},
       over: {},
-      settings: { code: '', name: name || '', fy: '', skc: '', skn: '', withPay: false },
+      settings: { code: '', name: name || '', fy: '', skc: '11', skn: '課税売上', withPay: false, withHeader: false },
     };
+  }
+  function withDefaults(st) {
+    for (const a of DEFAULT_ACCTS) if (!st.accts.some(x => x.code === a.code)) st.accts.push({ ...a });
+    st.accts.sort((a, b) => Number(a.code) - Number(b.code));
+    st.taxRules ||= {};
+    st.settings = { ...defaultOffice('').settings, ...st.settings, skc: st.settings?.skc || '11', skn: st.settings?.skn || '課税売上' };
+    return st;
   }
   let state = defaultOffice('');
   let officeVersion = 0, saveTimer = null;
@@ -336,22 +360,29 @@ html, body { margin: 0; }
     const { v10, v8 } = salesSplit(x);
     const s10 = v10.ex, s8 = v8.ex;
     const tenant = Math.round((s10 + s8) * n(S.rate) / 100), gas = Math.round(n(x.gas) * n(S.gasUnit)), staff = Math.round(n(x.hours) * n(S.staffUnit));
+    const inMode = m => m === 'in' ? '（税込で入力）' : '';
     const A = [
-      { k: 's10', name: '売上（10%）', amt: v10.inc, tax: 's10', src: `税抜 ${yen(v10.ex)}＋消費税 ${yen(v10.tax)}${x.t10mode === 'in' ? '（税込で入力）' : ''}` },
-      { k: 's8', name: '売上（8%）', amt: v8.inc, tax: 's8', src: `税抜 ${yen(v8.ex)}＋消費税 ${yen(v8.tax)}${x.t8mode === 'in' ? '（税込で入力）' : ''}` },
-      { k: 'biz', name: '業務扱い売上', amt: n(x.biz), tax: 's10', src: '税込' },
-      { k: 'meals', name: '従業員食事代', amt: Math.round(n(x.meals) * n(S.mealUnit)), tax: 's10', src: `${n(x.meals)}食×${yen(S.mealUnit)}円` },
-    ].filter(a => a.amt);
+      { k: 's10', name: '売上（10%）', amt: v10.ex, tax: 's10', def: '410', src: `税抜${inMode(x.t10mode)}` },
+      { k: 's10t', name: '売上（10%）消費税', amt: v10.tax, tax: 's10', def: '410', src: '消費税' },
+      { k: 's8', name: '売上（8%）', amt: v8.ex, tax: 's8', def: '410', src: `税抜${inMode(x.t8mode)}` },
+      { k: 's8t', name: '売上（8%）消費税', amt: v8.tax, tax: 's8', def: '410', src: '消費税' },
+      { k: 'biz', name: '業務扱い売上', amt: n(x.biz), tax: 's10', def: '411', src: '税込' },
+      { k: 'meals', name: '従業員食事代', amt: Math.round(n(x.meals) * n(S.mealUnit)), tax: 's10', def: '412', src: `${n(x.meals)}食×${yen(S.mealUnit)}円` },
+    ];
     const B = [
-      { k: 'shutten', name: '出店料', amt: n(S.shutten), tax: 'p10', src: '税込' },
-      { k: 'tenant', name: 'テナント料', amt: tenant + fl(tenant * 0.1), tax: 'p10', src: `${n(S.rate)}%＝${yen(tenant)}＋消費税 ${yen(fl(tenant * 0.1))}` },
-      { k: 'gas', name: 'ガス代', amt: gas + fl(gas * 0.1), tax: 'p10', src: `${n(x.gas)}㎥＝${yen(gas)}＋消費税 ${yen(fl(gas * 0.1))}` },
-      { k: 'fee', name: '事務手数料', amt: n(S.fee) + fl(n(S.fee) * 0.1), tax: 'p10', src: `${yen(n(S.fee))}＋消費税 ${yen(fl(n(S.fee) * 0.1))}` },
-      { k: 'staff', name: '人材派遣料', amt: staff, tax: 'p10', src: `${n(x.hours)}時間×${yen(S.staffUnit)}円（税込）` },
+      { k: 'shutten', name: '出店料', amt: n(S.shutten), tax: 'p10', def: '611', src: '税込' },
+      { k: 'tenant', name: 'テナント料', amt: tenant, tax: 'p10', def: '611', src: `売上の${n(S.rate)}%` },
+      { k: 'tenantt', name: 'テナント料 消費税', amt: fl(tenant * 0.1), tax: 'p10', def: '611', src: '消費税' },
+      { k: 'gas', name: 'ガス代', amt: gas, tax: 'p10', def: '635', src: `${n(x.gas)}㎥×${yen(S.gasUnit)}円` },
+      { k: 'gast', name: 'ガス代 消費税', amt: fl(gas * 0.1), tax: 'p10', def: '635', src: '消費税' },
+      { k: 'fee', name: '事務手数料', amt: n(S.fee) + fl(n(S.fee) * 0.1), tax: 'p10', def: '637', src: `${yen(n(S.fee))}＋消費税 ${yen(fl(n(S.fee) * 0.1))}` },
+      { k: 'staff', name: '人材派遣料', amt: staff, tax: 'p10', def: '626', src: `${n(x.hours)}時間×${yen(S.staffUnit)}円（税込）` },
       { k: 'prepaid', name: '前払い金', amt: n(x.prepaid), tax: '0', src: '前払い分の差し引き' },
-    ].filter(b => b.amt);
+    ];
+    (x.adj || []).forEach((a, i) => { if (a.label && n(a.amt)) (a.minus ? B : A).push({ k: `adj${i}`, name: a.label, amt: n(a.amt), tax: '0', src: a.minus ? 'その他の減算' : 'その他の加算' }); });
+    const keep = list => list.filter(r => r.amt);
     const pay = A.reduce((t, a) => t + a.amt, 0) - B.reduce((t, b) => t + b.amt, 0);
-    return { A, B, pay };
+    return { A: keep(A), B: keep(B), pay };
   }
 
   // 月末残高（このしくみで記録した分）
@@ -371,6 +402,18 @@ html, body { margin: 0; }
     return { cash, ar, ap };
   }
 
+  // 摘要の表記ゆれをならす（全角・半角、空白）
+  const normDesc = d => String(d || '').normalize('NFKC').replace(/\s/g, '');
+  // 覚えた摘要と同じか、覚えた摘要（2文字以上）を含む摘要なら、その科目を使う（長いものを優先）
+  function learned(rules, desc) {
+    const d = normDesc(desc);
+    if (!d) return '';
+    if (rules[d]) return rules[d];
+    let best = '';
+    for (const k of Object.keys(rules)) if (k.length >= 2 && k.length > best.length && !k.includes(':') && d.includes(k)) best = k;
+    return best ? rules[best] : '';
+  }
+
   // 顧問先の入力 → 仕訳の行。need は科目を選ぶ側（'dr' か 'cr'）
   function journals(which) {
     const out = [];
@@ -379,7 +422,7 @@ html, body { margin: 0; }
     const split = (base, o, side, fixed, desc, src) => {
       const noInv = side === 'dr' && !!o.noinv;
       const ks = ['t10', 't8', 'ot'].filter(k => o[k]);
-      for (const k of ks) out.push({ ...base, key: `${base.key}:${k}`, amt: o[k], tax: BUCKET_TAX[k], need: side,
+      for (const k of ks) out.push({ ...base, key: `${base.key}:${k}`, amt: o[k], tax: noInv && k === 't8' ? 'p8n' : BUCKET_TAX[k], bucket: k, need: side,
         [side === 'dr' ? 'cr' : 'dr']: fixed, desc, tekiyo: ks.length > 1 ? `${desc}・${BUCKET_NAME[k]}` : desc, src, noInv: noInv && k !== 'ot' });
     };
     if (which === 'cash') {
@@ -391,12 +434,14 @@ html, body { margin: 0; }
         else split({ key: r.id, date: r.date }, r, r.dir === 'in' ? 'cr' : 'dr', CASH, r.desc, `その他${r.partner ? '・' + r.partner : ''}${r.memo ? '・' + r.memo : ''}`);
       }
     } else if (which === 'sr') {
-      // 売上精算書：売上（Ａ表）は 売掛金／売上、差し引かれるもの（Ｂ表）は 経費／売掛金。税込処理なので本体と消費税をまとめる
+      // 売上精算書：売上（Ａ表）は 売掛金／売上、差し引かれるもの（Ｂ表）は 経費／売掛金。
+      // これまでのJDLの仕訳と同じく、本体と消費税は別の行にし、摘要は発行者の名前にする
       const x = CLIENT.sr[THIS];
       if (x) {
         const it = srItems(x, CLIENT.srSet);
-        for (const a of it.A) out.push({ key: `sr:${a.k}`, date: END, dr: URIKAKE, need: 'cr', amt: a.amt, tax: a.tax, desc: `売上精算:${a.name}`, tekiyo: `${M}月分${a.name}`, src: a.src });
-        for (const b of it.B) out.push({ key: `sr:${b.k}`, date: END, need: 'dr', cr: URIKAKE, amt: b.amt, tax: b.tax, desc: `売上精算:${b.name}`, tekiyo: `${M}月分${b.name}`, src: b.src });
+        const who = String(CLIENT.srSet.fromName || '').replace(/株式会社|（株）|\(株\)/g, '').trim();
+        for (const a of it.A) out.push({ key: `sr:${a.k}`, date: END, dr: URIKAKE, need: 'cr', amt: a.amt, tax: a.tax, def: a.def, desc: `売上精算:${a.k}`, tekiyo: who || `${M}月分${a.name}`, src: `${a.name}：${a.src}` });
+        for (const b of it.B) out.push({ key: `sr:${b.k}`, date: END, need: 'dr', cr: URIKAKE, amt: b.amt, tax: b.tax, def: b.def, desc: `売上精算:${b.k}`, tekiyo: who || `${M}月分${b.name}`, src: `${b.name}：${b.src}` });
       }
       if (state.settings.withPay) for (const [m, p] of Object.entries(CLIENT.srPaid)) {
         if (!p.date.startsWith(THIS)) continue;
@@ -426,9 +471,11 @@ html, body { margin: 0; }
       j.key = `${THIS}|${j.key}`;
       const o = state.over[j.key] || {};
       if (j.need) {
-        const ruled = state.rules[j.desc];
+        const ruled = state.rules[j.desc] || learned(state.rules, j.desc);
         j[j.need] = o.acct || ruled || j.def || '';
         j.auto = !o.acct && !!(ruled || j.def);
+        const tr = state.taxRules?.[normDesc(j.desc)];
+        if (j.bucket === 'ot' && tr) j.tax = tr;
         if (!o.tax && j[j.need] && acct(j[j.need])?.noTax) j.tax = '0';
       }
       if (o.tax) j.tax = o.tax;
@@ -511,15 +558,14 @@ html, body { margin: 0; }
     const js = journals(which);
     const problems = [];
     if (js.some(j => j.need && !j[j.need])) problems.push('科目が未設定の行があります。');
-    if (js.some(j => TAXES[j.tax].sales) && !(S.skc && S.skn)) problems.push('課税売上の課区（コードと名称）を入力してください。');
     const lines = [
-      `"＜商号Ｃ＞",${S.code},`, `"＜商号名＞",${q(S.name)},`, `"＜決算年月日＞",${q(S.fy)},`, `"＜会計処理方法＞","税込処理",`, '',
+      ...(S.withHeader ? [`"＜商号Ｃ＞",${S.code},`, `"＜商号名＞",${q(S.name)},`, `"＜決算年月日＞",${q(S.fy)},`, `"＜会計処理方法＞","税込処理",`, ''] : []),
       `"＜仕訳一覧＞",`,
       `"番号","日付","借方科目",,"借方補助",,"貸方科目",,"貸方補助",,"金額","摘要","課区",,"税区",,"別記区分","資金",,`,
     ];
     js.forEach((j, i) => {
       const t = TAXES[j.tax];
-      const ku = t.sales ? S.skc : t.ku, kuName = t.sales ? S.skn : t.kuName;
+      const ku = t.sales ? (S.skc || '11') : t.ku, kuName = t.sales ? (S.skn || '課税売上') : t.kuName;
       lines.push([i + 1, wareki(j.date), j.dr, q(acct(j.dr)?.name), '', '""', j.cr, q(acct(j.cr)?.name), '', '""', j.amt, q(j.tekiyo),
         ku, q(kuName), t.zei && j.tax !== '0' ? t.zei : '', q(j.tax !== '0' ? t.zeiName : ''), 0, '', '', ''].join(','));
     });
@@ -533,6 +579,7 @@ html, body { margin: 0; }
     $('preview').textContent = text.split('\r\n').slice(0, 14).join('\n') + '\n…';
     $('exportBtn').textContent = `${BOOKS[book]}のCSVを保存する`;
     $('s-withPay').checked = !!S.withPay;
+    $('s-withHeader').checked = !!S.withHeader; $('headerFields').hidden = !S.withHeader;
     $('exportBtn').disabled = problems.length > 0;
     const m = $('exportMsg'); m.className = 'msg'; m.textContent = problems.join(' ');
   }
@@ -546,7 +593,7 @@ html, body { margin: 0; }
     if (t.dataset.acct) {
       const j = journals(book).find(x => x.key === t.dataset.acct);
       state.over[j.key] = { ...(state.over[j.key] || {}), acct: t.value || undefined };
-      if (t.value) state.rules[j.desc] = t.value;   // 同じ内容の取引に次回から自動で入れる
+      if (t.value) state.rules[normDesc(j.desc)] = t.value;   // 同じ内容の取引に次回から自動で入れる
       if (t.value && acct(t.value)?.noTax) state.over[j.key].tax = '0';
     }
     if (t.dataset.tax) state.over[t.dataset.tax] = { ...(state.over[t.dataset.tax] || {}), tax: t.value };
@@ -563,7 +610,60 @@ html, body { margin: 0; }
   });
 
   $('s-withPay').addEventListener('change', e => { state.settings.withPay = e.target.checked; save(); render(); });
+  $('s-withHeader').addEventListener('change', e => { state.settings.withHeader = e.target.checked; save(); render(); });
   for (const k of ['code', 'name', 'fy', 'skc', 'skn']) $('s-' + k).addEventListener('input', e => { state.settings[k] = e.target.value.trim(); save(); renderExport(); });
+
+  // CSVを1行ずつ分ける（"…" の中のカンマ・改行に対応）
+  function parseCsv(text) {
+    const rows = []; let row = [], cell = '', q = false;
+    for (let i = 0; i < text.length; i++) {
+      const c = text[i];
+      if (q) { if (c === '"') { if (text[i + 1] === '"') { cell += '"'; i++; } else q = false; } else cell += c; }
+      else if (c === '"') q = true;
+      else if (c === ',') { row.push(cell); cell = ''; }
+      else if (c === '\n' || c === '\r') { if (c === '\r' && text[i + 1] === '\n') i++; row.push(cell); rows.push(row); row = []; cell = ''; }
+      else cell += c;
+    }
+    if (cell || row.length) { row.push(cell); rows.push(row); }
+    return rows;
+  }
+
+  $('learnFile').addEventListener('change', async e => {
+    const f = e.target.files[0], m = $('learnMsg');
+    if (!f || !current) return;
+    try {
+      if (typeof Encoding === 'undefined') throw new Error('Shift-JISを読む部品を読み込めませんでした。');
+      const text = Encoding.convert(new Uint8Array(await f.arrayBuffer()), { to: 'UNICODE', from: 'AUTO', type: 'string' });
+      const z = v => String(v || '').replace(/\u3000/g, '').trim();
+      const acc = {}, tax = {};
+      let rows = 0, added = 0;
+      for (const r of parseCsv(text)) {
+        if (!/^\d+$/.test(r[0] || '') || r.length < 16) continue;
+        rows++;
+        for (const [code, name] of [[r[2], r[3]], [r[6], r[7]]]) {
+          if (code && /^\d+$/.test(code) && !state.accts.some(a => a.code === code)) { state.accts.push({ code, name: z(name), noTax: false }); added++; }
+        }
+        // 現金の取引だけを覚える（顧問先が入力するのは現金出納帳なので）
+        const other = r[6] === CASH ? r[2] : r[2] === CASH ? r[6] : null;
+        if (!other || other === FUKUGO) continue;
+        const d = normDesc(z(r[11]));
+        if (!d) continue;
+        // 回数が同じなら、日付の新しいほうを使う（日付は和暦の数字なので大小で比べられる）
+        const bump = (o, k) => { const v = o[k] || [0, 0]; o[k] = [v[0] + 1, Math.max(v[1], Number(r[1]) || 0)]; };
+        bump(acc[d] ||= {}, other);
+        const tk = TAX_FROM_JDL[`${r[12] || ''}/${r[14] || ''}`];
+        if (tk) bump(tax[d] ||= {}, tk);
+      }
+      const top = o => Object.entries(o).sort((a, b) => b[1][0] - a[1][0] || b[1][1] - a[1][1])[0][0];
+      let n = 0;
+      for (const [d, o] of Object.entries(acc)) { state.rules[d] = top(o); n++; }
+      for (const [d, o] of Object.entries(tax)) state.taxRules[d] = top(o);
+      state.accts.sort((a, b) => Number(a.code) - Number(b.code));
+      save(); render();
+      m.className = 'msg ok'; m.textContent = `${rows}行の仕訳から、摘要${n}件の科目を覚えました。科目を${added}件追加しました。`;
+    } catch (err) { m.className = 'msg'; m.textContent = err.message || 'CSVを読めませんでした。'; }
+    e.target.value = '';
+  });
 
   $('accts').addEventListener('change', e => {
     const c = e.target.dataset.notax; if (!c) return;
@@ -631,7 +731,7 @@ html, body { margin: 0; }
     if (current) {
       const r = await api(`/api/office/clients/${id}/state`);
       docs = r.docs;
-      if (docs.office) { state = { ...defaultOffice(current.name), ...docs.office.data }; officeVersion = docs.office.version; }
+      if (docs.office) { state = withDefaults({ ...defaultOffice(current.name), ...docs.office.data }); officeVersion = docs.office.version; }
     }
     try { localStorage.setItem('office-client', id || ''); } catch (e) {}
     lastLoaded = Date.now();
@@ -644,7 +744,7 @@ html, body { margin: 0; }
     if (!current || saveTimer) return;
     const r = await api(`/api/office/clients/${current.id}/state`);
     docs = r.docs;
-    if (docs.office && docs.office.version !== officeVersion) { state = { ...defaultOffice(current.name), ...docs.office.data }; officeVersion = docs.office.version; }
+    if (docs.office && docs.office.version !== officeVersion) { state = withDefaults({ ...defaultOffice(current.name), ...docs.office.data }); officeVersion = docs.office.version; }
     await loadClients(); current = clients.find(c => c.id === current.id) || current;
     lastLoaded = Date.now();
     setSync(`${new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })} に最新の状態を読み込みました`);
