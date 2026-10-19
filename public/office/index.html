@@ -314,14 +314,29 @@ html, body { margin: 0; }
   const md = s => { const [, m, dd] = s.split('-'); return `${Number(m)}/${Number(dd)}`; };
   const acct = code => state.accts.find(a => a.code === code);
 
+  // 売上の税抜・消費税・税込。税込で入れたときは、消費税＝税込×税率÷（1＋税率）の切り捨て、税抜＝税込−消費税
+  function salesSplit(x) {
+    const n = v => Number(v) || 0;
+    const one = (amt, mode, r) => {
+      if (mode === 'in') { const tax = Math.floor(amt * r / (1 + r) + 1e-9); return { ex: amt - tax, tax, inc: amt }; }
+      const tax = Math.floor(amt * r + 1e-9);
+      return { ex: amt, tax, inc: amt + tax };
+    };
+    // 以前の入力（定食・料理・飲み物の内訳）も読めるようにする
+    const a10 = x.t10 !== undefined ? n(x.t10) : n(x.t10a) + n(x.t10b) + n(x.t10c);
+    const a8 = x.t8 !== undefined ? n(x.t8) : n(x.t8a) + n(x.t8b);
+    return { v10: one(a10, x.t10mode, 0.1), v8: one(a8, x.t8mode, 0.08) };
+  }
+
   // 売上精算書の項目（顧問先ページと同じ計算。消費税は切り捨て、テナント料は四捨五入）
   function srItems(x, S) {
     const n = v => Number(v) || 0, fl = Math.floor;
-    const s10 = n(x.t10a) + n(x.t10b) + n(x.t10c), s8 = n(x.t8a) + n(x.t8b);
+    const { v10, v8 } = salesSplit(x);
+    const s10 = v10.ex, s8 = v8.ex;
     const tenant = Math.round((s10 + s8) * n(S.rate) / 100), gas = Math.round(n(x.gas) * n(S.gasUnit)), staff = Math.round(n(x.hours) * n(S.staffUnit));
     const A = [
-      { k: 's10', name: '売上（10%）', amt: s10 + fl(s10 * 0.1), tax: 's10', src: `税抜 ${yen(s10)}＋消費税 ${yen(fl(s10 * 0.1))}` },
-      { k: 's8', name: '売上（8%）', amt: s8 + fl(s8 * 0.08), tax: 's8', src: `税抜 ${yen(s8)}＋消費税 ${yen(fl(s8 * 0.08))}` },
+      { k: 's10', name: '売上（10%）', amt: v10.inc, tax: 's10', src: `税抜 ${yen(v10.ex)}＋消費税 ${yen(v10.tax)}${x.t10mode === 'in' ? '（税込で入力）' : ''}` },
+      { k: 's8', name: '売上（8%）', amt: v8.inc, tax: 's8', src: `税抜 ${yen(v8.ex)}＋消費税 ${yen(v8.tax)}${x.t8mode === 'in' ? '（税込で入力）' : ''}` },
       { k: 'biz', name: '業務扱い売上', amt: n(x.biz), tax: 's10', src: '税込' },
       { k: 'meals', name: '従業員食事代', amt: Math.round(n(x.meals) * n(S.mealUnit)), tax: 's10', src: `${n(x.meals)}食×${yen(S.mealUnit)}円` },
     ].filter(a => a.amt);

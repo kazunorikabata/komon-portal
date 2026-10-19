@@ -117,6 +117,7 @@ h1 {
 .sr-calc td.q { color: var(--ink-soft); font-size: 12px; text-align: right; white-space: nowrap; }
 .sr-calc tr.sub td { color: var(--ink-soft); font-size: 13px; }
 .sr-calc tr.grand td { font-size: 17px; font-weight: 700; color: var(--accent); border-bottom: 2px solid var(--rule-red); }
+.sr-note { margin: 0; font-size: 12px; color: var(--ink-soft); font-family: var(--font-num); min-height: 1.2em; }
 .sr-settings summary { cursor: pointer; color: var(--accent); font-size: 14px; }
 .sr-settings[open] { display: grid; gap: 12px; }
 .pill.late { background: color-mix(in srgb, var(--out) 15%, transparent); color: var(--out); }
@@ -1019,7 +1020,6 @@ tfoot td { font-weight: bold; }
   /* ---------- 売上精算書（月ごと） ---------- */
 
   const SR_IN = [
-    ['t10a', '定食'], ['t10b', '料理'], ['t10c', '飲み物'], ['t8a', '料理'], ['t8b', '飲み物'],
     ['biz', '業務扱い売上（税込）'], ['meals', '従業員食事（食数）'], ['gas', 'ガス使用量（㎥）'], ['hours', '人材派遣（時間）'], ['prepaid', '前払い金'],
   ];
   const SR_SET = [
@@ -1031,16 +1031,31 @@ tfoot td { font-weight: bold; }
   const fnum = v => { const n = Number(String(v ?? '').replace(/,/g, '')); return isFinite(n) ? n : 0; };
   const floor = Math.floor;
 
+  // 売上の税抜・消費税・税込。税込で入れたときは、消費税＝税込×税率÷（1＋税率）の切り捨て、税抜＝税込−消費税
+  function salesSplit(x) {
+    const n = v => Number(v) || 0;
+    const one = (amt, mode, r) => {
+      if (mode === 'in') { const tax = Math.floor(amt * r / (1 + r) + 1e-9); return { ex: amt - tax, tax, inc: amt }; }
+      const tax = Math.floor(amt * r + 1e-9);
+      return { ex: amt, tax, inc: amt + tax };
+    };
+    // 以前の入力（定食・料理・飲み物の内訳）も読めるようにする
+    const a10 = x.t10 !== undefined ? n(x.t10) : n(x.t10a) + n(x.t10b) + n(x.t10c);
+    const a8 = x.t8 !== undefined ? n(x.t8) : n(x.t8a) + n(x.t8b);
+    return { v10: one(a10, x.t10mode, 0.1), v8: one(a8, x.t8mode, 0.08) };
+  }
+
   // Excelの式と同じ計算（消費税は切り捨て、テナント料は四捨五入）
   function srCalc(x, S, m) {
     const [y, mo] = m.split('-').map(Number);
     const pre = `${y}年${mo}月`;
-    const s10 = fnum(x.t10a) + fnum(x.t10b) + fnum(x.t10c), s8 = fnum(x.t8a) + fnum(x.t8b);
+    const { v10, v8 } = salesSplit(x);
+    const s10 = v10.ex, s8 = v8.ex;
     const A = [
       { label: `${pre}分売上`, amt: s10 },
-      { label: '同上消費税(10%)', amt: floor(s10 * 0.1) },
+      { label: '同上消費税(10%)', amt: v10.tax },
       { label: `${pre}分売上（軽減税率分）`, amt: s8 },
-      { label: '同上消費税(8%)', amt: floor(s8 * 0.08) },
+      { label: '同上消費税(8%)', amt: v8.tax },
       { label: '業務扱い売上（税込）', amt: fnum(x.biz) },
       { label: `${pre}従業員食事代（＠${yen(S.mealUnit)}円税込/食）`, qty: `${fnum(x.meals)}食分`, amt: Math.round(fnum(x.meals) * fnum(S.mealUnit)) },
     ];
@@ -1063,7 +1078,12 @@ tfoot td { font-weight: bold; }
   }
 
   function srDraft() {
-    const x = view.srDraft || state.sr[view.month] || {};
+    const x = { ...(view.srDraft || state.sr[view.month] || {}) };
+    if (x.t10 === undefined && ['t10a', 't10b', 't10c', 't8a', 't8b'].some(k => x[k] !== undefined)) {
+      const { v10, v8 } = salesSplit(x);
+      x.t10 = v10.ex; x.t8 = v8.ex; x.t10mode = 'ex'; x.t8mode = 'ex';
+    }
+    for (const k of ['t10a', 't10b', 't10c', 't8a', 't8b']) delete x[k];
     return { ...x, adj: (x.adj && x.adj.length ? x.adj : [{}, {}]).map(a => ({ ...a })) };
   }
 
@@ -1075,13 +1095,15 @@ tfoot td { font-weight: bold; }
     $('ledgerHint').textContent = 'その月の売上などを入力すると、精算額を自動で計算します。';
     const inp = (k, label, step = '1') => `<label class="f" for="sr-${k}">${label}<input type="number" id="sr-${k}" data-sr="${k}" inputmode="decimal" min="0" step="${step}" value="${x[k] ?? ''}"${dis}></label>`;
     const L = Object.fromEntries(SR_IN);
+    const modeSel = k => `<label class="f" for="sr-${k}">入力のしかた<select id="sr-${k}" data-srm="${k}"${dis}>
+      <option value="ex"${x[k] !== 'in' ? ' selected' : ''}>税抜で入力</option><option value="in"${x[k] === 'in' ? ' selected' : ''}>税込で入力</option></select></label>`;
     $('srBox').innerHTML = `
       <div class="sr-grid">
         <div class="entry">
           <h3>${lock ? 'この月は提出済みのため直せません' : '入力する'}</h3>
           <div class="sr-sec"><h4>支払予定日</h4><div class="fields"><label class="f" for="sr-payDate">支払予定日（ふつうは翌月末）<input type="date" id="sr-payDate" value="${x.payDate || monthEnd(shiftMonth(m, 1))}"${dis}></label></div></div>
-          <div class="sr-sec"><h4>10％の売上（税抜）</h4><div class="fields">${inp('t10a', L.t10a)}${inp('t10b', L.t10b)}${inp('t10c', L.t10c)}</div></div>
-          <div class="sr-sec"><h4>8％の売上（税抜）</h4><div class="fields">${inp('t8a', L.t8a)}${inp('t8b', L.t8b)}</div></div>
+          <div class="sr-sec"><h4>10％の売上</h4><div class="fields">${inp('t10', '金額（円）')}${modeSel('t10mode')}</div><p class="sr-note" id="sr-n10"></p></div>
+          <div class="sr-sec"><h4>8％の売上（軽減税率）</h4><div class="fields">${inp('t8', '金額（円）')}${modeSel('t8mode')}</div><p class="sr-note" id="sr-n8"></p></div>
           <div class="sr-sec"><h4>そのほかの売上</h4><div class="fields">${inp('biz', L.biz)}${inp('meals', L.meals)}</div></div>
           <div class="sr-sec"><h4>差し引かれるもの</h4><div class="fields">${inp('gas', L.gas, '0.1')}${inp('hours', L.hours, '0.25')}${inp('prepaid', L.prepaid)}</div></div>
           <div class="sr-sec"><h4>その他の加算・減算（任意）</h4>
@@ -1107,13 +1129,18 @@ tfoot td { font-weight: bold; }
   function readSR() {
     const x = view.srDraft;
     document.querySelectorAll('#srBox [data-sr]').forEach(el => { x[el.dataset.sr] = el.value === '' ? undefined : Number(el.value); });
+    document.querySelectorAll('#srBox [data-srm]').forEach(el => { x[el.dataset.srm] = el.value; });
     if ($('sr-payDate')) x.payDate = $('sr-payDate').value || monthEnd(shiftMonth(view.month, 1));
     document.querySelectorAll('#srBox [data-adj]').forEach(el => { x.adj[el.dataset.adj][el.dataset.k] = el.type === 'checkbox' ? el.checked : el.value; });
     return x;
   }
 
   function updateSR() {
-    const r = srCalc(readSR(), state.srSet, view.month);
+    const x0 = readSR();
+    const r = srCalc(x0, state.srSet, view.month);
+    const { v10, v8 } = salesSplit(x0);
+    const note = v => v.inc ? `税抜 ${yen(v.ex)} ＋ 消費税 ${yen(v.tax)} ＝ 税込 ${yen(v.inc)}` : '';
+    if ($('sr-n10')) { $('sr-n10').textContent = note(v10); $('sr-n8').textContent = note(v8); }
     const row = (o, cls = '') => `<tr class="${cls}"><td>${esc(o.label)}</td><td class="q">${o.qty || ''}</td><td class="num">${yen(o.amt)}</td></tr>`;
     $('srCalc').innerHTML = `<tbody>
       <tr class="sub"><td colspan="3">Ａ表　売上金額</td></tr>${r.A.map(o => row(o)).join('')}
@@ -1134,7 +1161,7 @@ tfoot td { font-weight: bold; }
   $('srBox').addEventListener('click', async e => {
     if (e.target.id === 'srSave') {
       const x = readSR();
-      if (!(fnum(x.t10a) + fnum(x.t10b) + fnum(x.t10c) + fnum(x.t8a) + fnum(x.t8b))) return srMsg('売上を入力してください。');
+      if (!(salesSplit(x).v10.inc + salesSplit(x).v8.inc)) return srMsg('売上を入力してください。');
       state.sr[view.month] = JSON.parse(JSON.stringify(x));
       if (reopened(view.month)) addLog(view.month, `修正：売上精算書 支払金額 ${yen(srCalc(x, state.srSet, view.month).pay)}円`);
       save(); renderTabs(); renderPay(); srMsg('保存しました。', true);
