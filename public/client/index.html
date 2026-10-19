@@ -1,0 +1,1730 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>帳簿入力</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Shippori+Mincho+B1:wght@600;700&family=Zen+Kaku+Gothic+New:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: 帳簿の罫線を思わせる一枚の台帳。上に月と状況、中央に帳簿表、下に記入ボタンと記入欄、最後に提出 */
+:root {
+  --paper: #fbfaf7;
+  --sheet: #ffffff;
+  --ink: #1d2733;
+  --ink-soft: #5a6573;
+  --rule: #e6e1d8;
+  --rule-red: #c2453a;      /* 帳簿の朱罫 */
+  --accent: #1f5c4a;        /* 深緑インク */
+  --accent-soft: #e4efe9;
+  --in: #1f5c4a;
+  --out: #a33a2f;
+  --warn-bg: #fdf3dc;
+  --warn-fg: #7a5410;
+  --lock-bg: #e9edf2;
+  --lock-fg: #3b4a5c;
+  --font-display: "Shippori Mincho B1", "Hiragino Mincho ProN", "Yu Mincho", serif;
+  --font-body: "Zen Kaku Gothic New", "Hiragino Sans", "Yu Gothic", "Meiryo", sans-serif;
+  --font-num: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #14181d; --sheet: #1b2027; --ink: #e6e9ed; --ink-soft: #9aa5b1;
+    --rule: #2c333c; --rule-red: #d9675c; --accent: #6cc3a3; --accent-soft: #1d3530;
+    --in: #6cc3a3; --out: #ec8a7f; --warn-bg: #3a3018; --warn-fg: #f0cf86;
+    --lock-bg: #252d37; --lock-fg: #b8c4d2; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #14181d; --sheet: #1b2027; --ink: #e6e9ed; --ink-soft: #9aa5b1;
+  --rule: #2c333c; --rule-red: #d9675c; --accent: #6cc3a3; --accent-soft: #1d3530;
+  --in: #6cc3a3; --out: #ec8a7f; --warn-bg: #3a3018; --warn-fg: #f0cf86;
+  --lock-bg: #252d37; --lock-fg: #b8c4d2; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { margin: 0; }
+img { max-width: 100%; }
+body {
+  background: var(--paper); color: var(--ink);
+  font-family: var(--font-body); font-size: 15px; line-height: 1.6;
+}
+.wrap {
+  max-width: 1040px; margin: 0 auto;
+  padding-block: 28px 64px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  display: grid; gap: 22px;
+}
+.sync { font-size: 12px; color: var(--ink-soft); min-height: 1.2em; }
+.sync.bad { color: var(--out); }
+.reload-bar { position: sticky; top: 0; z-index: 20; background: var(--warn-bg); color: var(--warn-fg); padding: 10px 14px; border-radius: 4px; display: flex; gap: 12px; align-items: center; justify-content: space-between; flex-wrap: wrap; }
+.demo-note {
+  background: var(--warn-bg); color: var(--warn-fg);
+  border-radius: 6px; padding: 8px 12px; font-size: 13px;
+}
+header.top { display: flex; flex-wrap: wrap; gap: 12px 24px; align-items: end; justify-content: space-between; }
+.client { display: grid; gap: 2px; min-width: 0; }
+.eyebrow { font-size: 12px; letter-spacing: .12em; color: var(--ink-soft); }
+h1 {
+  font-family: var(--font-display); font-weight: 700;
+  font-size: clamp(24px, 4vw, 32px); line-height: 1.25; margin: 0; text-wrap: balance;
+}
+.month-ctl { display: flex; align-items: center; gap: 8px; }
+.month-ctl button {
+  width: 36px; height: 36px; border-radius: 50%;
+  border: 1px solid var(--rule); background: var(--sheet); color: var(--ink);
+  font-size: 16px; cursor: pointer;
+}
+.month-label { font-family: var(--font-display); font-size: 22px; min-width: 7.5em; text-align: center; }
+
+.status {
+  display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; justify-content: space-between;
+  border-top: 2px solid var(--rule-red); border-bottom: 1px solid var(--rule-red);
+  padding-block: 10px;
+}
+.chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 3px 10px; border-radius: 999px; font-size: 13px;
+  background: var(--sheet); border: 1px solid var(--rule); color: var(--ink-soft);
+}
+.chip b { color: var(--ink); font-weight: 500; font-family: var(--font-num); }
+.pill { padding: 3px 12px; border-radius: 999px; font-size: 13px; font-weight: 500; }
+.pill.open { background: var(--accent-soft); color: var(--accent); }
+.pill.locked { background: var(--lock-bg); color: var(--lock-fg); }
+.pill.req { background: var(--warn-bg); color: var(--warn-fg); }
+.pill.none { background: transparent; color: var(--ink-soft); border: 1px dashed var(--rule); }
+.top-right { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; }
+#yearView { display: grid; gap: 12px; }
+#yearView table { min-width: 760px; }
+#yearView tbody tr.clickable { cursor: pointer; }
+#yearView tbody tr.clickable:hover td { background: var(--accent-soft); }
+#yearView tr.current td:first-child { font-weight: 700; }
+#yearView td.diff-bad { color: var(--out); }
+.history { font-size: 13px; }
+.history summary { cursor: pointer; color: var(--accent); }
+.history ol { margin: 8px 0 0; padding-left: 1.4em; display: grid; gap: 4px; }
+.history time { font-family: var(--font-num); color: var(--ink-soft); margin-right: 6px; }
+.req-form { display: grid; gap: 8px; width: 100%; }
+.sr-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+@media (max-width: 860px) { .sr-grid { grid-template-columns: 1fr; } }
+.sr-sec { display: grid; gap: 10px; }
+.sr-sec h4 { margin: 0; font-size: 13px; color: var(--ink-soft); font-weight: 500; letter-spacing: .06em; border-bottom: 1px solid var(--rule-red); padding-bottom: 4px; }
+.sr-calc table { min-width: 0; font-size: 14px; }
+.sr-calc td { padding: 6px 10px; }
+.sr-calc td.q { color: var(--ink-soft); font-size: 12px; text-align: right; white-space: nowrap; }
+.sr-calc tr.sub td { color: var(--ink-soft); font-size: 13px; }
+.sr-calc tr.grand td { font-size: 17px; font-weight: 700; color: var(--accent); border-bottom: 2px solid var(--rule-red); }
+.sr-settings summary { cursor: pointer; color: var(--accent); font-size: 14px; }
+.sr-settings[open] { display: grid; gap: 12px; }
+.pill.late { background: color-mix(in srgb, var(--out) 15%, transparent); color: var(--out); }
+.pill.part { background: var(--warn-bg); color: var(--warn-fg); }
+#payBox table { min-width: 820px; }
+#plBox table.pl { min-width: 1080px; font-size: 14px; }
+#plBox table.pl td { padding: 6px 8px; vertical-align: middle; }
+#plBox table.pl input { padding: 5px 6px; font-size: 14px; width: 7.5em; }
+#plBox td.bank { font-size: 12px; color: var(--ink-soft); white-space: nowrap; }
+#plBox tr.noinv td { color: var(--ink-soft); }
+#plBox td.pp input[type=date] { width: 9.5em; }
+#plBox tr.grp td { background: color-mix(in srgb, var(--rule) 40%, transparent); font-size: 12px; font-weight: 500; letter-spacing: .06em; padding: 4px 8px; }
+.pl-sum { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; align-items: start; }
+.pl-sum table { min-width: 0; }
+.pl-master summary { cursor: pointer; color: var(--accent); font-size: 14px; }
+.pl-master[open] { display: grid; gap: 12px; }
+.pl-master table { min-width: 900px; font-size: 13px; }
+#payBox tr.editing td { background: var(--accent-soft); }
+.pay-edit { display: grid; gap: 10px; padding: 4px 0; }
+.cand { font-size: 13px; padding: 8px 10px; border-radius: 4px; background: var(--sheet); border: 1px dashed var(--accent); display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between; }
+
+nav.tabs { display: flex; gap: 4px; overflow-x: auto; border-bottom: 1px solid var(--rule); }
+nav.tabs button {
+  appearance: none; border: 0; background: none; cursor: pointer;
+  padding: 10px 16px; font: inherit; font-weight: 500; color: var(--ink-soft);
+  border-bottom: 3px solid transparent; white-space: nowrap;
+}
+nav.tabs button[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--accent); }
+nav.tabs button .count { font-family: var(--font-num); font-size: 12px; margin-left: 4px; color: var(--ink-soft); }
+
+.ledger-head { display: flex; flex-wrap: wrap; gap: 8px 20px; justify-content: space-between; align-items: baseline; }
+.ledger-head h2 { font-family: var(--font-display); font-size: 20px; margin: 0; }
+.ledger-head p { margin: 0; color: var(--ink-soft); font-size: 13px; }
+
+.table-box { overflow-x: auto; background: var(--sheet); border: 1px solid var(--rule); border-radius: 4px; }
+table { border-collapse: collapse; width: 100%; min-width: 720px; }
+th, td { padding: 9px 12px; border-bottom: 1px solid var(--rule); text-align: left; vertical-align: top; }
+thead th {
+  font-size: 12px; font-weight: 500; letter-spacing: .06em; color: var(--ink-soft);
+  border-bottom: 1px solid var(--rule-red); white-space: nowrap;
+}
+td.num, th.num { text-align: right; font-family: var(--font-num); font-variant-numeric: tabular-nums; white-space: nowrap; }
+td.in { color: var(--in); }
+td.out { color: var(--out); }
+td.date { font-family: var(--font-num); white-space: nowrap; }
+td.desc small { display: block; color: var(--ink-soft); font-size: 12px; }
+tr.carry td { color: var(--ink-soft); background: color-mix(in srgb, var(--rule) 30%, transparent); }
+tr.total td { border-top: 1px solid var(--rule-red); border-bottom: 2px solid var(--rule-red); font-weight: 500; }
+.tag { font-size: 11px; padding: 1px 6px; border-radius: 4px; border: 1px solid var(--rule); color: var(--ink-soft); margin-left: 6px; white-space: nowrap; }
+.tag.reduced { border-color: var(--warn-fg); color: var(--warn-fg); }
+.kind { font-size: 12px; padding: 1px 8px; border-radius: 999px; white-space: nowrap; background: var(--accent-soft); color: var(--accent); }
+.kind.exp { background: var(--warn-bg); color: var(--warn-fg); }
+.kind.other { background: var(--lock-bg); color: var(--lock-fg); }
+.row-actions { display: flex; gap: 6px; justify-content: flex-end; white-space: nowrap; }
+.link-btn {
+  background: none; border: 0; padding: 2px 4px; cursor: pointer; font: inherit; font-size: 13px;
+  color: var(--accent); text-decoration: underline; text-underline-offset: 2px;
+}
+.link-btn.danger { color: var(--out); }
+.empty { padding: 28px 12px; text-align: center; color: var(--ink-soft); }
+
+.entry {
+  background: var(--sheet); border: 1px solid var(--rule); border-radius: 4px;
+  padding: 16px; display: grid; gap: 14px; min-width: 0;
+}
+.entry h3 { margin: 0; font-size: 15px; font-weight: 700; }
+.fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+.fields .wide { grid-column: span 2; }
+@media (max-width: 520px) { .fields .wide { grid-column: auto; } }
+label.f { display: grid; gap: 4px; font-size: 12px; color: var(--ink-soft); min-width: 0; }
+input[type=text], input[type=date], input[type=number], select {
+  font: inherit; font-size: 15px; color: var(--ink);
+  background: var(--paper); border: 1px solid var(--rule); border-radius: 4px;
+  padding: 8px 10px; width: 100%;
+}
+input[type=number] { font-family: var(--font-num); text-align: right; }
+input:focus-visible, select:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.check { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--ink); }
+.form-foot { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between; }
+.btn {
+  font: inherit; font-weight: 500; cursor: pointer; border-radius: 4px; padding: 9px 18px;
+  border: 1px solid var(--accent); background: var(--accent); color: var(--sheet);
+}
+.btn.ghost { background: transparent; color: var(--accent); }
+.btn:disabled { opacity: .45; cursor: not-allowed; }
+.msg { font-size: 13px; color: var(--out); min-height: 1.2em; }
+.msg.ok { color: var(--in); }
+
+/* 現金出納帳の3つの記入ボタン */
+.kind-btns { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+@media (max-width: 520px) { .kind-btns { grid-template-columns: 1fr; } }
+.kind-btn {
+  font: inherit; text-align: left; cursor: pointer; color: var(--ink);
+  background: var(--paper); border: 1px solid var(--rule); border-radius: 6px;
+  padding: 12px 14px; display: grid; gap: 2px;
+}
+.kind-btn b { font-size: 17px; font-weight: 700; }
+.kind-btn span { font-size: 12px; color: var(--ink-soft); }
+.kind-btn[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); box-shadow: inset 0 0 0 1px var(--accent); }
+.kind-btn:disabled { opacity: .45; cursor: not-allowed; }
+.seg { display: flex; flex-wrap: wrap; gap: 8px; border: 0; padding: 0; margin: 0; }
+.seg legend { font-size: 12px; color: var(--ink-soft); margin-bottom: 4px; padding: 0; }
+.seg label {
+  display: inline-flex; align-items: center; gap: 6px; cursor: pointer;
+  border: 1px solid var(--rule); border-radius: 999px; padding: 6px 14px; background: var(--paper);
+}
+.seg label:has(input:checked) { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); font-weight: 500; }
+.tax-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; align-items: end; }
+.sum-box {
+  display: grid; gap: 2px; padding: 8px 12px; border-radius: 4px;
+  background: var(--accent-soft); color: var(--accent);
+}
+.sum-box small { font-size: 12px; }
+.sum-box b { font-family: var(--font-num); font-size: 20px; font-variant-numeric: tabular-nums; text-align: right; }
+table.lines { min-width: 860px; }
+table.lines td { padding: 6px 6px; vertical-align: middle; }
+table.lines input { padding: 6px 8px; font-size: 14px; }
+table.lines .c-date { width: 9.5em; }
+table.lines .c-amt { width: 8.5em; }
+table.lines td.line-total { font-weight: 500; }
+
+.submit-bar {
+  display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between;
+  padding: 14px 16px; border-radius: 4px; background: var(--accent-soft);
+}
+.submit-bar p { margin: 0; font-size: 14px; }
+.submit-bar.locked { background: var(--lock-bg); }
+.submit-bar.count { display: grid; background: var(--sheet); border: 2px solid var(--accent); }
+.submit-bar.count h3 { font-family: var(--font-display); font-size: 20px; margin: 0; }
+
+footer { font-size: 12px; color: var(--ink-soft); display: grid; gap: 4px; }
+@media (prefers-reduced-motion: no-preference) { .btn, nav.tabs button, .kind-btn { transition: background .15s, color .15s, border-color .15s; } }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <div class="reload-bar" id="reloadBar" hidden><span id="reloadMsg"></span><button type="button" class="btn" id="reloadBtn">読み込み直す</button></div>
+  <header class="top">
+    <div class="client">
+      <span class="eyebrow">顧問先専用ページ</span>
+      <h1 id="clientName">読み込み中…</h1>
+      <span class="sync" id="syncState" role="status"></span>
+    </div>
+    <div class="top-right">
+      <div class="month-ctl" aria-label="表示する月">
+        <button type="button" id="prevMonth" aria-label="前へ">‹</button>
+        <span class="month-label" id="monthLabel"></span>
+        <button type="button" id="nextMonth" aria-label="次へ">›</button>
+      </div>
+      <button type="button" class="btn ghost" id="yearBtn">年間一覧</button>
+    </div>
+  </header>
+
+  <section class="status" aria-label="今月の状況">
+    <div class="chips" id="chips"></div>
+    <span class="pill" id="monthState"></span>
+  </section>
+
+  <section id="yearView" hidden></section>
+
+  <nav class="tabs" role="tablist" id="tabs"></nav>
+
+  <section id="ledger" style="display:grid;gap:14px">
+    <div class="ledger-head">
+      <h2 id="ledgerTitle"></h2>
+      <p id="ledgerHint"></p>
+    </div>
+    <div id="srBox" hidden style="display:grid;gap:14px"></div>
+    <div id="payBox" hidden style="display:grid;gap:14px"></div>
+    <div id="plBox" hidden style="display:grid;gap:14px"></div>
+    <div class="entry" id="cashPanel" hidden>
+      <h3 id="cashPanelTitle">記入する</h3>
+      <div class="kind-btns" id="kindBtns">
+        <button type="button" class="kind-btn" data-kind="in" id="kb-in" aria-pressed="false"><b>入金</b><span>預金からの引き出し・現金売上</span></button>
+        <button type="button" class="kind-btn" data-kind="exp" id="kb-exp" aria-pressed="false"><b>経費精算</b><span>立て替えた経費を現金で精算</span></button>
+        <button type="button" class="kind-btn" data-kind="other" id="kb-other" aria-pressed="false"><b>その他</b><span>上のどれにも当てはまらない入出金</span></button>
+      </div>
+      <form id="cashForm" novalidate hidden style="display:grid;gap:14px"></form>
+    </div>
+
+    <form class="entry" id="entryForm" novalidate>
+      <h3 id="formTitle">記入する</h3>
+      <div class="fields" id="fields"></div>
+      <div class="form-foot">
+        <span class="msg" id="formMsg" role="status"></span>
+        <div style="display:flex;gap:8px">
+          <button type="button" class="btn ghost" id="cancelEdit" hidden>やめる</button>
+          <button type="submit" class="btn" id="saveBtn">追加する</button>
+        </div>
+      </div>
+    </form>
+
+    <div class="table-box" id="tableBox"><table id="table"></table></div>
+  </section>
+
+  <section class="submit-bar" id="submitBar"></section>
+
+  <footer>
+    <span>勘定科目は事務所で付けますので、内容と金額だけ入力してください。わからない取引は「メモ」に書いておいてください。</span>
+    <span>提出したあとに直したいときは、「修正を依頼する」から事務所に依頼してください。</span>
+  </footer>
+</div>
+
+<script>
+(() => {
+  const LEDGERS = {
+    cash: { name: '現金出納帳', hint: 'レジや手元の現金の出し入れを、上のボタンから記入します。', balance: true, custom: true },
+    bank: {
+      name: '預金出納帳', hint: '通帳の入出金を記入します。対象口座：〇〇銀行 本店 普通', balance: true,
+      fields: [
+        { k: 'date', label: '日付', type: 'date' },
+        { k: 'desc', label: '内容', type: 'text', wide: true, ph: '例：家賃、売上入金' },
+        { k: 'partner', label: '相手先', type: 'text', ph: '例：〇〇不動産' },
+        { k: 'in', label: '入金（円）', type: 'num' },
+        { k: 'out', label: '出金（円）', type: 'num' },
+        { k: 'memo', label: 'メモ（任意）', type: 'text', wide: true },
+        { k: 'reduced', label: '食品・飲料など（軽減税率8%）', type: 'check' },
+        { k: 'noinv', label: 'インボイスなし（登録番号の記載がない）', type: 'check' },
+      ],
+    },
+    sales: {
+      name: '売上帳', hint: '請求した売上・お店の売上を記入します。', balance: false,
+      fields: [
+        { k: 'date', label: '日付', type: 'date' },
+        { k: 'partner', label: '得意先', type: 'text', ph: '例：〇〇商店' },
+        { k: 'desc', label: '内容', type: 'text', wide: true, ph: '例：10月分 保守料' },
+        { k: 'amount', label: '金額（税込・円）', type: 'num' },
+        { k: 'method', label: '受け取り方', type: 'select', opts: ['現金', '振込', '後日入金（売掛）'] },
+        { k: 'memo', label: 'メモ（任意）', type: 'text', wide: true },
+        { k: 'reduced', label: '食品・飲料など（軽減税率8%）', type: 'check' },
+      ],
+      cols: [['date', '日付'], ['partner', '得意先'], ['desc', '内容'], ['method', '受け取り方'], ['amount', '金額（税込）', 'num']],
+    },
+    purchase: {
+      name: '仕入帳', hint: '商品・材料の仕入れを記入します。', balance: false,
+      fields: [
+        { k: 'date', label: '日付', type: 'date' },
+        { k: 'partner', label: '仕入先', type: 'text', ph: '例：〇〇食品' },
+        { k: 'desc', label: '内容', type: 'text', wide: true, ph: '例：小麦粉 25kg' },
+        { k: 'amount', label: '金額（税込・円）', type: 'num' },
+        { k: 'method', label: '支払い方', type: 'select', opts: ['現金', '振込', '後日支払い（買掛）'] },
+        { k: 'memo', label: 'メモ（任意）', type: 'text', wide: true },
+        { k: 'reduced', label: '食品・飲料など（軽減税率8%）', type: 'check' },
+        { k: 'noinv', label: 'インボイスなし（登録番号の記載がない）', type: 'check' },
+      ],
+      cols: [['date', '日付'], ['partner', '仕入先'], ['desc', '内容'], ['method', '支払い方'], ['amount', '金額（税込）', 'num']],
+    },
+  };
+  const ORDER = ['cash'];
+  const DENOMS = [10000, 5000, 2000, 1000, 500, 100, 50, 10, 5, 1];
+  const TAX = [['t10', '10%対象'], ['t8', '8%対象（軽減）'], ['ot', 'その他（非課税・不課税）']];
+  const KIND = { in: '入金', exp: '経費精算', other: 'その他' };
+  const IN_TYPES = { bank: '預金から引き出し', sales: '現金売上' };
+  const KEY = 'client-ledger-demo-v8';
+
+  const now = new Date();
+  const ym = (y, m) => `${y}-${String(m).padStart(2, '0')}`;
+  const thisYM = ym(now.getFullYear(), now.getMonth() + 1);
+  const today = `${thisYM}-${String(now.getDate()).padStart(2, '0')}`;
+  const d = day => `${thisYM}-${String(day).padStart(2, '0')}`;
+  const FY_START = 4;   // 事業年度の始まりの月（例：3月決算）
+  const pd = (back, day) => { const dt = new Date(now.getFullYear(), now.getMonth() - back, 1); return `${ym(dt.getFullYear(), dt.getMonth() + 1)}-${String(day).padStart(2, '0')}`; };
+  let seq = 0;
+  const id = () => `r${Date.now().toString(36)}${(seq++).toString(36)}`;
+  const splitTotal = o => (o.t10 || 0) + (o.t8 || 0) + (o.ot || 0);
+
+  // 現金出納帳の行から、表示用の内容・相手先・金額を組み立てる
+  function normalizeCash(r) {
+    if (r.kind === 'in') {
+      r.desc = IN_TYPES[r.inType]; r.partner = r.inType === 'bank' ? '〇〇銀行' : ''; delete r.out;
+    } else if (r.kind === 'exp') {
+      for (const [k] of TAX) r[k] = r.lines.reduce((s, l) => s + (l[k] || 0), 0);
+      r.out = splitTotal(r); r.desc = `経費精算（報告：${r.reporter}）`; r.partner = r.reporter; delete r.in;
+    } else {
+      const t = splitTotal(r);
+      if (r.dir === 'in') { r.in = t; delete r.out; } else { r.out = t; delete r.in; }
+    }
+    return r;
+  }
+  // 「預金から引き出し」は預金出納帳にも出金の行を作る
+  function syncBank(s, r) {
+    s.rows.bank = s.rows.bank.filter(b => b.from !== r.id);
+    if (r.kind === 'in' && r.inType === 'bank') s.rows.bank.push({ id: id(), date: r.date, desc: '現金の引き出し', partner: '現金出納帳へ', out: r.in, from: r.id });
+  }
+
+  /* ---------- サーバーとのやりとり ---------- */
+
+  const SR_DEFAULT = { title: '売上精算書', toName: '', toAddr: '', toReg: '', fromName: '', fromAddr: '', shutten: 0, rate: 0, mealUnit: 0, gasUnit: 0, fee: 0, staffUnit: 0 };
+  // 月ごとのデータの名前（サーバー） → 画面の中での名前
+  const PLURAL = { count: 'counts', submitted: 'submitted', requests: 'requests', log: 'log', sr: 'sr', srPaid: 'srPaid', inv: 'inv', plPaid: 'plPaid' };
+  function emptyState() {
+    return { opening: { cash: 0 }, rows: { cash: [], bank: [], sales: [], purchase: [] }, counts: {}, submitted: {}, requests: {}, log: {},
+      sr: {}, srPaid: {}, inv: {}, plPaid: {}, suppliers: [], srSet: { ...SR_DEFAULT } };
+  }
+  // 画面のデータ → サーバーの単位（master と 月ごと）
+  function split(s) {
+    const out = { master: { opening: s.opening, srSet: s.srSet, suppliers: s.suppliers } };
+    const months = new Set(s.rows.cash.map(r => r.date.slice(0, 7)));
+    for (const pk of Object.values(PLURAL)) for (const m of Object.keys(s[pk] || {})) months.add(m);
+    for (const m of months) {
+      const d = { rows: s.rows.cash.filter(r => r.date.startsWith(m)) };
+      for (const [k, pk] of Object.entries(PLURAL)) if (s[pk]?.[m] !== undefined) d[k] = s[pk][m];
+      out['m:' + m] = d;
+    }
+    return out;
+  }
+  function merge(docs) {
+    const s = emptyState();
+    const ms = docs.master?.data;
+    if (ms) { if (ms.opening) s.opening = ms.opening; if (ms.srSet) s.srSet = { ...s.srSet, ...ms.srSet }; if (ms.suppliers) s.suppliers = ms.suppliers; }
+    for (const [key, doc] of Object.entries(docs)) {
+      if (!key.startsWith('m:')) continue;
+      const m = key.slice(2), d = doc.data || {};
+      s.rows.cash.push(...(d.rows || []));
+      for (const [k, pk] of Object.entries(PLURAL)) if (d[k] !== undefined) s[pk][m] = d[k];
+    }
+    return s;
+  }
+
+  let versions = {}, synced = {}, saving = false, again = false, saveTimer = null, loaded = false;
+  function setSync(text, bad) { const el = document.getElementById('syncState'); if (el) { el.textContent = text; el.className = 'sync' + (bad ? ' bad' : ''); } }
+  function showReload(text) { document.getElementById('reloadMsg').textContent = text; document.getElementById('reloadBar').hidden = false; }
+  function save() { if (!loaded) return; clearTimeout(saveTimer); saveTimer = setTimeout(flush, 300); setSync('保存中…'); }
+  async function flush() {
+    if (saving) { again = true; return; }
+    saving = true;
+    try {
+      const parts = split(state);
+      for (const key of new Set([...Object.keys(parts), ...Object.keys(synced)])) {
+        const data = parts[key] || { rows: [] };
+        const text = JSON.stringify(data);
+        if (synced[key] === text) continue;
+        const res = await fetch('/api/doc/' + key, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ data, version: versions[key] || 0 }) });
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok) throw Object.assign(new Error(body.error || '保存できませんでした。'), { status: res.status });
+        versions[key] = body.version; synced[key] = text;
+      }
+      setSync('保存しました');
+    } catch (err) {
+      setSync(err.message || '保存できませんでした。通信を確認してください。', true);
+      if (err.status === 409 || err.status === 423 || err.status === 401) showReload(err.message);
+    } finally {
+      saving = false;
+      if (again) { again = false; flush(); }
+    }
+  }
+  window.addEventListener('beforeunload', e => { if (saving || saveTimer && document.getElementById('syncState')?.textContent === '保存中…') { e.preventDefault(); e.returnValue = ''; } });
+
+  async function boot() {
+    try {
+      const meRes = await fetch('/api/me');
+      const me = await meRes.json();
+      if (!meRes.ok) throw new Error(me.error);
+      CLIENT_NAME = me.client.name;
+      document.getElementById('clientName').textContent = `${me.client.name} 様`;
+      document.title = `${me.client.name} 帳簿入力`;
+      const res = await fetch('/api/state');
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.error);
+      state = merge(body.docs);
+      versions = Object.fromEntries(Object.entries(body.docs).map(([k, d]) => [k, d.version]));
+      synced = Object.fromEntries(Object.entries(split(state)).map(([k, v]) => [k, JSON.stringify(v)]));
+      for (const [k, d] of Object.entries(body.docs)) if (!(k in synced)) synced[k] = JSON.stringify(d.data);
+      if (!state.srSet.toName) state.srSet.toName = me.client.name;
+      loaded = true;
+      setSync('');
+      render();
+    } catch (err) {
+      document.getElementById('clientName').textContent = '読み込めませんでした';
+      showReload(err.message || '通信を確認して、読み込み直してください。');
+    }
+  }
+
+  let state = emptyState();
+  let CLIENT_NAME = '';
+  let view = { mode: 'month', ledger: 'cash', month: thisYM, editing: null, cashKind: null, draft: null, submitStep: null, countDraft: null, reqForm: false };
+  try { const t = localStorage.getItem(KEY + ':tab'); if (t === 'cash' || t === 'sr' || t === 'pl') view.ledger = t; } catch (e) {}
+
+  const $ = s => document.getElementById(s);
+  const yen = n => (n || n === 0) ? Number(n).toLocaleString('ja-JP') : '';
+  const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const monthName = m => { const [y, mo] = m.split('-'); return `${y}年${Number(mo)}月`; };
+  const shiftMonth = (m, delta) => { const [y, mo] = m.split('-').map(Number); const dt = new Date(y, mo - 1 + delta, 1); return ym(dt.getFullYear(), dt.getMonth() + 1); };
+  const monthEnd = m => { const [y, mo] = m.split('-').map(Number); return `${m}-${String(new Date(y, mo, 0).getDate()).padStart(2, '0')}`; };
+  const defDate = () => today.startsWith(view.month) ? today : `${view.month}-01`;
+  const inMonth = (r, m) => r.date && r.date.startsWith(m);
+  const sorted = rows => rows.slice().sort((a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : 0);
+  const locked = () => !!state.submitted[view.month];
+  const pendingReq = m => (state.requests[m] || []).find(r => r.status === 'pending');
+  const reopened = m => (state.requests[m] || []).some(r => r.status === 'approved');
+  const stamp = () => { const t = new Date(); return `${t.getMonth() + 1}月${t.getDate()}日 ${String(t.getHours()).padStart(2, '0')}:${String(t.getMinutes()).padStart(2, '0')}`; };
+  function addLog(m, text, who) { (state.log[m] ||= []).push({ at: stamp(), text, ...(who && { who }) }); }
+  // 修正依頼が承認された月は、直した内容を履歴に残す
+  function logChange(m, action, ledger, r) {
+    if (!reopened(m)) return;
+    const amt = r.in || r.out || r.amount || 0;
+    addLog(m, `${action}：${LEDGERS[ledger].name} ${Number(r.date.slice(8))}日 ${r.desc || ''} ${yen(amt)}円`);
+  }
+  const md = s => { const [, mo, da] = s.split('-'); return `${Number(mo)}/${Number(da)}`; };
+  const num = v => { v = String(v ?? '').trim(); return v === '' ? undefined : Math.max(0, Math.round(Number(v))) || undefined; };
+  const splitText = o => TAX.filter(([k]) => o[k]).map(([k, l]) => `${l.replace('対象', '').replace('（軽減）', '')} ${yen(o[k])}`).join('／');
+
+  function openingFor(key, m) {
+    let bal = state.opening[key] || 0;
+    for (const r of state.rows[key]) if (r.date && r.date < `${m}-01`) bal += (r.in || 0) - (r.out || 0);
+    return bal;
+  }
+  function bookCashAt(date) {
+    let bal = state.opening.cash || 0;
+    for (const r of state.rows.cash) if (r.date && r.date <= date) bal += (r.in || 0) - (r.out || 0);
+    return bal;
+  }
+  const countTotal = c => DENOMS.reduce((s, v) => s + v * (Number(c?.['d' + v]) || 0), 0);
+
+  function renderTabs() {
+    $('tabs').innerHTML = ORDER.map(k => {
+      const n = state.rows[k].filter(r => inMonth(r, view.month)).length;
+      return `<button type="button" role="tab" id="tab-${k}" aria-selected="${k === view.ledger}" data-k="${k}">${LEDGERS[k].name}<span class="count">${n}</span></button>`;
+    }).join('') + `<button type="button" role="tab" id="tab-sr" aria-selected="${view.ledger === 'sr'}" data-k="sr">売上精算書・入金確認<span class="count">${state.sr?.[view.month] ? '済' : '未'}</span>${payRows().some(r => r.st.cls === 'late') ? '<span class="count" style="color:var(--out)">期限超過あり</span>' : ''}</button>` +
+      `<button type="button" role="tab" id="tab-pl" aria-selected="${view.ledger === 'pl'}" data-k="pl">仕入一覧（請求書）<span class="count">${plInvoices(view.month).length}</span></button>`;
+  }
+
+  function renderStatus() {
+    const m = view.month;
+    const cashEnd = openingFor('cash', shiftMonth(m, 1));
+    const srPay = state.sr?.[m] ? srCalc(state.sr[m], state.srSet, m).pay : null;
+    const plSum = plInvoices(m).reduce((t, sp) => t + plTotal(plInv(m, sp.id)), 0);
+    $('chips').innerHTML =
+      `<span class="chip">現金残高 <b>${yen(cashEnd)}</b></span>` +
+      `<span class="chip">売上精算の支払金額 <b>${srPay === null ? '—' : yen(srPay)}</b></span>` +
+      `<span class="chip">仕入の請求額 <b>${yen(plSum)}</b></span>`;
+    const st = $('monthState');
+    const ms = monthStatus(m);
+    st.className = 'pill ' + ms.cls;
+    st.textContent = ms.cls === 'locked' ? `提出済み（${state.submitted[m]}）` : ms.label;
+  }
+
+  function renderTable() {
+    const L = LEDGERS[view.ledger];
+    const isCash = view.ledger === 'cash';
+    $('ledgerTitle').textContent = `${L.name}　${monthName(view.month)}`;
+    $('ledgerHint').textContent = L.hint;
+    const rows = sorted(state.rows[view.ledger].filter(r => inMonth(r, view.month)));
+    const printBtn = r => isCash && r.kind === 'exp' ? `<button type="button" class="link-btn" data-print="${r.id}">精算書を印刷</button>` : '';
+    const actions = r => locked() ? (printBtn(r) ? `<div class="row-actions">${printBtn(r)}</div>` : '') :
+      r.from ? `<div class="row-actions"><span class="tag">現金出納帳から自動</span></div>` :
+      `<div class="row-actions">${printBtn(r)}<button type="button" class="link-btn" data-edit="${r.id}">直す</button><button type="button" class="link-btn danger" data-del="${r.id}">${view.confirmDel === r.id ? '本当に消す' : '消す'}</button></div>`;
+    const hasInv = !isCash && L.fields.some(f => f.k === 'noinv');
+    const noInvLines = r => r.lines.filter(l => (l.t10 || l.t8) && l.noinv).length;
+    const noInvTag = '<span class="tag reduced">インボイスなし</span>';
+    const tags = r => (r.reduced ? '<span class="tag reduced">8%</span>' : '') +
+      (hasInv && (r.out || r.amount) && r.noinv ? noInvTag : '') +
+      (isCash && r.kind === 'other' && r.dir !== 'in' && (r.t10 || r.t8) && r.noinv ? noInvTag : '') +
+      (isCash && r.kind === 'exp' && noInvLines(r) ? `<span class="tag reduced">インボイスなし ${noInvLines(r)}件</span>` : '');
+    const detail = r => {
+      if (!isCash) return r.memo ? `<small>${esc(r.memo)}</small>` : '';
+      const parts = [];
+      if (r.kind === 'exp') parts.push(`報告 ${esc(r.reporter)}／精算 ${esc(r.settler)}・${r.lines.length}件`);
+      if (r.kind !== 'in' && splitText(r)) parts.push(esc(splitText(r)));
+      if (r.memo) parts.push(esc(r.memo));
+      return parts.map(p => `<small>${p}</small>`).join('');
+    };
+    const descCell = r => `<td class="desc">${esc(r.desc)}${tags(r)}${detail(r)}</td>`;
+    const kindCell = r => isCash ? `<td><span class="kind ${r.kind}">${KIND[r.kind]}</span></td>` : '';
+    let html = '';
+    if (L.balance) {
+      let bal = openingFor(view.ledger, view.month);
+      let tin = 0, tout = 0;
+      const k = isCash ? '<td></td>' : '';
+      html += `<thead><tr><th>日付</th>${isCash ? '<th>区分</th>' : ''}<th>内容</th><th>相手先</th><th class="num">入金</th><th class="num">出金</th><th class="num">残高</th><th></th></tr></thead><tbody>`;
+      html += `<tr class="carry"><td class="date">${md(view.month + '-01')}</td>${k}<td>前月から繰越</td><td></td><td></td><td></td><td class="num">${yen(bal)}</td><td></td></tr>`;
+      for (const r of rows) {
+        bal += (r.in || 0) - (r.out || 0); tin += r.in || 0; tout += r.out || 0;
+        html += `<tr><td class="date">${md(r.date)}</td>${kindCell(r)}${descCell(r)}<td>${esc(r.partner)}</td><td class="num in">${yen(r.in)}</td><td class="num out">${yen(r.out)}</td><td class="num">${yen(bal)}</td><td>${actions(r)}</td></tr>`;
+      }
+      if (!rows.length) html += `<tr><td colspan="${isCash ? 8 : 7}" class="empty">この月の記入はまだありません。上の「記入する」から追加してください。</td></tr>`;
+      html += `<tr class="total"><td></td>${k}<td>今月の合計</td><td></td><td class="num in">${yen(tin)}</td><td class="num out">${yen(tout)}</td><td class="num">${yen(bal)}</td><td></td></tr></tbody>`;
+    } else {
+      let total = 0;
+      const cols = L.cols, span = cols.length + 1;
+      const cell = (r, [k, , isNum]) =>
+        k === 'date' ? `<td class="date">${md(r.date)}</td>` :
+        k === 'desc' ? descCell(r) :
+        isNum ? `<td class="num">${yen(r[k])}</td>` : `<td>${esc(r[k])}</td>`;
+      html += `<thead><tr>${cols.map(([, label, isNum]) => `<th${isNum ? ' class="num"' : ''}>${label}</th>`).join('')}<th></th></tr></thead><tbody>`;
+      for (const r of rows) {
+        total += r.amount || 0;
+        html += `<tr>${cols.map(c => cell(r, c)).join('')}<td>${actions(r)}</td></tr>`;
+      }
+      if (!rows.length) html += `<tr><td colspan="${span}" class="empty">この月の記入はまだありません。上の「記入する」から追加してください。</td></tr>`;
+      const pad = '<td></td>'.repeat(cols.length - 2);
+      html += `<tr class="total"><td></td><td>今月の合計</td>${pad}<td class="num">${yen(total)}</td><td></td></tr>`;
+      if (L.byPayer && rows.length) {
+        const per = {};
+        for (const r of rows) per[r.payer || '（未記入）'] = (per[r.payer || '（未記入）'] || 0) + (r.amount || 0);
+        for (const [p, v] of Object.entries(per)) html += `<tr class="carry"><td></td><td>うち ${esc(p)} さん</td>${pad}<td class="num">${yen(v)}</td><td></td></tr>`;
+      }
+      html += '</tbody>';
+    }
+    $('table').innerHTML = html;
+  }
+
+  /* ---------- 現金出納帳：入金・経費精算・その他 ---------- */
+
+  const blankLine = () => ({ date: '', partner: '', desc: '' });
+
+  function startCash(kind, row) {
+    view.cashKind = kind;
+    view.editing = row ? row.id : null;
+    if (kind === 'in') view.draft = row ? { inType: row.inType, date: row.date, amount: row.in } : { inType: 'bank', date: defDate() };
+    if (kind === 'exp') view.draft = row ? { date: row.date, reporter: row.reporter, settler: row.settler, lines: row.lines.map(l => ({ ...l })) } : { date: defDate(), lines: [blankLine(), blankLine()] };
+    if (kind === 'other') view.draft = row ? { ...row } : { dir: 'out', date: defDate() };
+  }
+
+  const amtInput = (fid, val, attrs = '') => `<input type="number" id="${fid}" inputmode="numeric" min="0" step="1" value="${val ?? ''}"${attrs}>`;
+  const dateAttrs = () => ` min="${view.month}-01" max="${monthEnd(view.month)}"`;
+
+  function renderCashPanel() {
+    const lock = locked();
+    $('cashPanelTitle').textContent = lock ? 'この月は提出済みのため記入できません' : view.editing ? '記入を直す' : '記入する';
+    for (const k of ['in', 'exp', 'other']) {
+      const b = $('kb-' + k);
+      b.setAttribute('aria-pressed', String(view.cashKind === k));
+      b.disabled = lock || (!!view.editing && view.cashKind !== k);
+    }
+    const f = $('cashForm');
+    f.hidden = lock || !view.cashKind;
+    if (f.hidden) { f.innerHTML = ''; return; }
+    const D = view.draft;
+    let html = '';
+    if (view.cashKind === 'in') {
+      html += `<fieldset class="seg"><legend>入金の種類</legend>${Object.entries(IN_TYPES).map(([k, l]) =>
+        `<label for="ci-${k}"><input type="radio" name="inType" id="ci-${k}" value="${k}"${D.inType === k ? ' checked' : ''}>${l}</label>`).join('')}</fieldset>
+        <div class="fields">
+          <label class="f" for="ci-date">日付<input type="date" id="ci-date" value="${D.date || ''}"${dateAttrs()}></label>
+          <label class="f" for="ci-amount">金額（円）${amtInput('ci-amount', D.amount)}</label>
+        </div>
+`;
+    }
+    if (view.cashKind === 'exp') {
+      html += `<div class="fields">
+          <label class="f" for="ce-date">精算した日<input type="date" id="ce-date" value="${D.date || ''}"${dateAttrs()}></label>
+          <label class="f" for="ce-reporter">報告者（立て替えた人）<input type="text" id="ce-reporter" value="${esc(D.reporter || '')}" placeholder="例：山田"></label>
+          <label class="f" for="ce-settler">精算者（現金を渡した人）<input type="text" id="ce-settler" value="${esc(D.settler || '')}" placeholder="例：佐藤"></label>
+        </div>
+        <div class="table-box"><table class="lines">
+          <thead><tr><th class="c-date">支払った日</th><th>支払先</th><th>内容</th>${TAX.map(([, l]) => `<th class="num c-amt">${l}</th>`).join('')}<th class="num">合計</th><th>インボイスなし</th><th></th></tr></thead>
+          <tbody>${D.lines.map((l, i) => `<tr>
+            <td><input type="date" id="cl-${i}-date" data-i="${i}" data-k="date" value="${l.date || ''}" aria-label="${i + 1}行目 支払った日"></td>
+            <td><input type="text" id="cl-${i}-partner" data-i="${i}" data-k="partner" value="${esc(l.partner || '')}" placeholder="例：JR東海" aria-label="${i + 1}行目 支払先"></td>
+            <td><input type="text" id="cl-${i}-desc" data-i="${i}" data-k="desc" value="${esc(l.desc || '')}" placeholder="例：新幹線代" aria-label="${i + 1}行目 内容"></td>
+            ${TAX.map(([k, lb]) => `<td>${amtInput(`cl-${i}-${k}`, l[k], ` data-i="${i}" data-k="${k}" aria-label="${i + 1}行目 ${lb}"`)}</td>`).join('')}
+            <td class="num line-total" id="cl-${i}-total"></td>
+            <td style="text-align:center"><input type="checkbox" id="cl-${i}-noinv" data-i="${i}" data-k="noinv"${l.noinv ? ' checked' : ''} aria-label="${i + 1}行目 インボイスなし"></td>
+            <td><button type="button" class="link-btn danger" data-rmline="${i}" aria-label="${i + 1}行目を消す"${D.lines.length < 2 ? ' disabled' : ''}>×</button></td>
+          </tr>`).join('')}</tbody>
+          <tbody id="ce-sum"></tbody>
+        </table></div>
+        <div><button type="button" class="btn ghost" id="ce-addline">＋ 行を追加</button></div>
+        <p style="margin:0;font-size:12px;color:var(--ink-soft)">1枚のレシートに10%と8%が混ざっているときは、同じ行のそれぞれの欄に税込金額を分けて入れてください。切手・印紙・保険料などは「その他」です。レシートや領収書に登録番号（T＋13桁）がないときは「インボイスなし」にチェックを付けてください。</p>`;
+    }
+    if (view.cashKind === 'other') {
+      html += `<fieldset class="seg"><legend>お金の動き</legend>
+          <label for="co-out"><input type="radio" name="dir" id="co-out" value="out"${D.dir !== 'in' ? ' checked' : ''}>出金（現金が減る）</label>
+          <label for="co-in"><input type="radio" name="dir" id="co-in" value="in"${D.dir === 'in' ? ' checked' : ''}>入金（現金が増える）</label>
+        </fieldset>
+        <div class="fields">
+          <label class="f" for="co-date">日付<input type="date" id="co-date" value="${D.date || ''}"${dateAttrs()}></label>
+          <label class="f wide" for="co-desc">内容<input type="text" id="co-desc" value="${esc(D.desc || '')}" placeholder="例：コピー用紙、収入印紙"></label>
+          <label class="f" for="co-partner">相手先<input type="text" id="co-partner" value="${esc(D.partner || '')}" placeholder="例：アスクル"></label>
+        </div>
+        <div class="tax-grid">
+          ${TAX.map(([k, l]) => `<label class="f" for="co-${k}">${l}（税込・円）${amtInput('co-' + k, D[k])}</label>`).join('')}
+          <div class="sum-box"><small>合計金額</small><b id="co-total">0</b></div>
+        </div>
+        <label class="check" for="co-noinv"><input type="checkbox" id="co-noinv"${D.noinv ? ' checked' : ''}>インボイスなし（レシート・領収書に登録番号T＋13桁の記載がない）</label>
+        <label class="f" for="co-memo">メモ（任意）<input type="text" id="co-memo" value="${esc(D.memo || '')}"></label>`;
+    }
+    html += `<div class="form-foot"><span class="msg" id="cfMsg" role="status"></span>
+      <div style="display:flex;gap:8px"><button type="button" class="btn ghost" id="cf-cancel">やめる</button>
+      <button type="submit" class="btn">${view.editing ? '直した内容で保存' : '記入する'}</button></div></div>`;
+    f.innerHTML = html;
+    updateCashTotals();
+  }
+
+  function readCashForm() {
+    const D = view.draft;
+    if (view.cashKind === 'in') {
+      D.inType = document.querySelector('#cashForm [name=inType]:checked')?.value || 'bank';
+      D.date = $('ci-date').value; D.amount = num($('ci-amount').value);
+    } else if (view.cashKind === 'exp') {
+      D.date = $('ce-date').value; D.reporter = $('ce-reporter').value.trim(); D.settler = $('ce-settler').value.trim();
+      document.querySelectorAll('#cashForm [data-i]').forEach(el => {
+        const l = D.lines[el.dataset.i], k = el.dataset.k;
+        l[k] = el.type === 'checkbox' ? el.checked : TAX.some(([t]) => t === k) ? num(el.value) : el.value.trim();
+      });
+    } else if (view.cashKind === 'other') {
+      D.dir = document.querySelector('#cashForm [name=dir]:checked')?.value || 'out';
+      D.date = $('co-date').value; D.desc = $('co-desc').value.trim(); D.partner = $('co-partner').value.trim(); D.memo = $('co-memo').value.trim(); D.noinv = $('co-noinv').checked;
+      for (const [k] of TAX) D[k] = num($('co-' + k).value);
+    }
+    return D;
+  }
+
+  function updateCashTotals() {
+    if (!view.cashKind || $('cashForm').hidden) return;
+    const D = readCashForm();
+    if (view.cashKind === 'exp') {
+      D.lines.forEach((l, i) => { $(`cl-${i}-total`).textContent = yen(splitTotal(l) || ''); });
+      const sum = Object.fromEntries(TAX.map(([k]) => [k, D.lines.reduce((s, l) => s + (l[k] || 0), 0)]));
+      $('ce-sum').innerHTML = `<tr class="total"><td colspan="3">合計金額（精算する額）</td>${TAX.map(([k]) => `<td class="num">${yen(sum[k])}</td>`).join('')}<td class="num out">${yen(splitTotal(sum))}</td><td></td><td></td></tr>`;
+    }
+    if (view.cashKind === 'other') $('co-total').textContent = yen(splitTotal(D));
+  }
+
+  function cashMsg(t) { const m = $('cfMsg'); m.className = 'msg'; m.textContent = t; }
+
+  function saveCash() {
+    const D = readCashForm();
+    const inM = s => s && s.startsWith(view.month);
+    let rec;
+    if (view.cashKind === 'in') {
+      if (!inM(D.date)) return cashMsg(`日付は${monthName(view.month)}の中から選んでください。`);
+      if (!D.amount) return cashMsg('金額を入力してください。');
+      rec = { kind: 'in', inType: D.inType, date: D.date, in: D.amount };
+    }
+    if (view.cashKind === 'exp') {
+      if (!inM(D.date)) return cashMsg(`精算した日は${monthName(view.month)}の中から選んでください。`);
+      if (!D.reporter) return cashMsg('報告者を入力してください。');
+      if (!D.settler) return cashMsg('精算者を入力してください。');
+      const lines = D.lines.filter(l => l.desc || l.partner || splitTotal(l));
+      if (!lines.length) return cashMsg('経費を1行以上入力してください。');
+      const bad = lines.findIndex(l => !splitTotal(l) || !l.desc);
+      if (bad >= 0) return cashMsg(`${D.lines.indexOf(lines[bad]) + 1}行目：内容と金額を入力してください。`);
+      rec = { kind: 'exp', date: D.date, reporter: D.reporter, settler: D.settler,
+        lines: lines.map(l => { const o = {}; for (const k of ['date', 'partner', 'desc', 't10', 't8', 'ot', 'noinv']) if (l[k]) o[k] = l[k]; return o; }) };
+    }
+    if (view.cashKind === 'other') {
+      if (!inM(D.date)) return cashMsg(`日付は${monthName(view.month)}の中から選んでください。`);
+      if (!D.desc) return cashMsg('内容を入力してください。');
+      if (!splitTotal(D)) return cashMsg('金額を、10%・8%・その他のいずれかの欄に入力してください。');
+      rec = { kind: 'other', dir: D.dir, date: D.date, desc: D.desc };
+      for (const k of ['partner', 'memo', 't10', 't8', 'ot', 'noinv']) if (D[k]) rec[k] = D[k];
+    }
+    rec.id = view.editing || id();
+    normalizeCash(rec);
+    const list = state.rows.cash, i = list.findIndex(r => r.id === rec.id);
+    if (i >= 0) list[i] = rec; else list.push(rec);
+    syncBank(state, rec);
+    const wasEdit = !!view.editing;
+    logChange(view.month, wasEdit ? '修正' : '追加', 'cash', rec);
+    view.editing = null; view.cashKind = null; view.draft = null;
+    save(); render();
+    flash(wasEdit ? '直しました。' : rec.kind === 'exp' ? '経費精算を記入しました。表の「精算書を印刷」から精算書を出して、受け取りサインをもらってください。' : `${KIND[rec.kind]}を記入しました。`);
+  }
+
+  // 印刷用のページを新しいタブで開く（開けないときはファイルとして保存する）
+  function openPrint(filename, html) {
+    const url = URL.createObjectURL(new Blob([html], { type: 'text/html;charset=utf-8' }));
+    const w = window.open(url, '_blank');
+    if (!w) { const a = document.createElement('a'); a.href = url; a.download = filename; document.body.appendChild(a); a.click(); a.remove(); }
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+  }
+
+  // 経費精算書（印刷して受け取りサインをもらう用）をHTMLファイルとして渡す
+  function expDoc(r) {
+    const jp = s => { const [y, m, dd] = s.split('-').map(Number); return `${y}年${m}月${dd}日`; };
+    const sum = k => r.lines.reduce((s, l) => s + (l[k] || 0), 0);
+    const rows = r.lines.map((l, i) => `<tr><td>${i + 1}</td><td>${md(l.date || r.date)}</td><td>${esc(l.partner || '')}</td><td>${esc(l.desc)}</td>
+      ${TAX.map(([k]) => `<td class="n">${l[k] ? yen(l[k]) : ''}</td>`).join('')}<td class="n b">${yen(splitTotal(l))}</td><td class="c">${l.noinv ? 'なし' : ''}</td></tr>`).join('');
+    const blank = Math.max(0, 5 - r.lines.length);
+    const empty = `<tr>${'<td>&nbsp;</td>'.repeat(9)}</tr>`.repeat(blank);
+    return `<!doctype html><html lang="ja"><head><meta charset="utf-8"><title>経費精算書 ${esc(r.reporter)} ${jp(r.date)}</title>
+<style>
+@page { size: A4 portrait; margin: 0; }
+* { box-sizing: border-box; }
+html, body { margin: 0; background: #e9e9e9; }
+body { font-family: "Hiragino Mincho ProN", "Yu Mincho", "MS Mincho", serif; color: #000; font-size: 10.5pt; }
+.bar { font-family: sans-serif; background: #eef3f0; padding: 8px 12px; font-size: 10pt; display: flex; gap: 12px; align-items: center; justify-content: center; }
+.bar button { font-size: 11pt; padding: 6px 14px; }
+.page { width: 210mm; height: 297mm; margin: 8mm auto; padding: 12mm 14mm; background: #fff; display: flex; flex-direction: column; gap: 4mm; overflow: hidden; box-shadow: 0 1px 6px rgba(0,0,0,.2); }
+@media print { html, body { background: #fff; } .bar { display: none; } .page { margin: 0; box-shadow: none; } }
+h1 { text-align: center; font-size: 18pt; letter-spacing: .5em; margin: 0; border-bottom: 3px double #000; padding-bottom: 2mm; }
+.head { display: flex; justify-content: space-between; gap: 10mm; }
+.head table { border-collapse: collapse; }
+.head td { padding: 1mm 3mm; border-bottom: 1px solid #000; }
+.head td:first-child { color: #333; width: 5em; }
+table.list { width: 100%; border-collapse: collapse; font-size: 9pt; }
+table.list th, table.list td { border: 1px solid #000; padding: 1.2mm 1.5mm; height: 6.5mm; }
+table.list th { background: #f0f0f0; font-weight: normal; }
+.n { text-align: right; font-family: "Courier New", monospace; white-space: nowrap; }
+.c { text-align: center; } .b { font-weight: bold; }
+tfoot td { font-weight: bold; }
+.note { font-size: 8pt; margin: -2mm 0 0; }
+.receipt { border: 1.5px solid #000; padding: 4mm 5mm; display: grid; gap: 4mm; }
+.receipt p { margin: 0; font-size: 11.5pt; }
+.amount { font-size: 16pt; font-weight: bold; border-bottom: 2px solid #000; padding: 0 3mm; }
+.sign { display: grid; grid-template-columns: auto 1fr; gap: 4mm 6mm; align-items: end; }
+.sign .t small { display: block; font-size: 8.5pt; color: #333; }
+.sign .w { border-bottom: 1px solid #000; height: 12mm; position: relative; }
+.sign .w::before { content: "署名"; position: absolute; left: 0; bottom: 1mm; font-size: 7.5pt; color: #666; }
+.paste { flex: 1; min-height: 50mm; border: 1.5px dashed #555; position: relative; }
+.paste span { position: absolute; top: 2mm; left: 3mm; font-size: 9pt; color: #555; font-family: sans-serif; }
+.paste em { position: absolute; inset: 0; display: grid; place-items: center; font-style: normal; color: #bbb; font-size: 14pt; letter-spacing: .3em; }
+</style></head><body>
+<div class="bar"><button onclick="window.print()">印刷する</button><span>A4縦で印刷してください。印刷画面が開かないときは、このボタンを押してください。</span></div>
+<div class="page">
+<h1>経費精算書</h1>
+<div class="head">
+  <table><tr><td>会社名</td><td>${esc(CLIENT_NAME)}</td></tr><tr><td>精算日</td><td>${jp(r.date)}</td></tr></table>
+  <table><tr><td>報告者</td><td>${esc(r.reporter)}</td></tr></table>
+</div>
+<table class="list">
+  <thead><tr><th>No</th><th>日付</th><th>支払先</th><th>内容</th><th>10%対象</th><th>8%対象</th><th>その他</th><th>合計</th><th>インボイス</th></tr></thead>
+  <tbody>${rows}${empty}</tbody>
+  <tfoot><tr><td colspan="4" class="c">合計</td>${TAX.map(([k]) => `<td class="n">${yen(sum(k))}</td>`).join('')}<td class="n">${yen(r.out)}</td><td></td></tr></tfoot>
+</table>
+<p class="note">金額はすべて税込です。「その他」は非課税・不課税のもの（切手・印紙など）です。インボイス欄の「なし」は登録番号の記載がない領収書です。</p>
+<div class="receipt">
+  <p>上記の立替金として　<span class="amount">￥${yen(r.out)}－</span>　を受け取りました。</p>
+  <div class="sign">
+    <div class="t">受取日</div><div>　　　　年　　　月　　　日</div>
+    <div class="t">受取人<small>${esc(r.reporter)} 様</small></div><div class="w"></div>
+  </div>
+</div>
+<div class="paste"><span>領収書貼付欄（レシート・領収書をここに貼ってください）</span><em>のりしろ</em></div>
+</div>
+<script>window.addEventListener('load', () => setTimeout(() => window.print(), 300));<\/script>
+</body></html>`;
+  }
+
+  async function printExp(r) {
+    if (!r) return;
+    try {
+      openPrint(`経費精算書_${r.reporter}_${r.date}.html`, expDoc(r));
+      flash('精算書を新しいタブで開きました。印刷してください。');
+    } catch (err) {
+      flash(err?.code === 'declined' ? '保存をやめました。' : '精算書を保存できませんでした。', err?.code !== 'declined');
+    }
+  }
+
+  function flash(t, bad) {
+    const h = $('cashPanelTitle'); h.textContent = t; h.style.color = bad ? 'var(--out)' : 'var(--in)';
+    setTimeout(() => { h.style.color = ''; if (!view.cashKind) h.textContent = locked() ? 'この月は提出済みのため記入できません' : '記入する'; }, 6000);
+  }
+
+  $('kindBtns').addEventListener('click', e => {
+    const b = e.target.closest('[data-kind]'); if (!b || locked() || view.editing) return;
+    if (view.cashKind === b.dataset.kind) { view.cashKind = null; view.draft = null; } else startCash(b.dataset.kind);
+    renderCashPanel();
+  });
+  $('cashForm').addEventListener('input', updateCashTotals);
+  $('cashForm').addEventListener('change', updateCashTotals);
+  $('cashForm').addEventListener('click', e => {
+    if (e.target.id === 'cf-cancel') { view.cashKind = null; view.draft = null; view.editing = null; renderCashPanel(); }
+    else if (e.target.id === 'ce-addline') { readCashForm(); view.draft.lines.push(blankLine()); renderCashPanel(); $(`cl-${view.draft.lines.length - 1}-date`).focus(); }
+    else if (e.target.dataset.rmline !== undefined) { readCashForm(); view.draft.lines.splice(Number(e.target.dataset.rmline), 1); renderCashPanel(); }
+  });
+  $('cashForm').addEventListener('submit', e => { e.preventDefault(); if (!locked()) saveCash(); });
+
+  /* ---------- そのほかの帳簿の記入欄 ---------- */
+
+  function renderForm() {
+    const L = LEDGERS[view.ledger];
+    const r = view.editing ? state.rows[view.ledger].find(x => x.id === view.editing) : null;
+    const lock = locked();
+    $('formTitle').textContent = lock ? 'この月は提出済みのため記入できません' : r ? '記入を直す' : '記入する';
+    $('fields').innerHTML = L.fields.map(f => {
+      const v = r ? r[f.k] : (f.k === 'date' ? defDate() : '');
+      const fid = `f-${view.ledger}-${f.k}`;
+      const dis = lock ? ' disabled' : '';
+      if (f.type === 'check') return `<label class="check${f.wide ? ' wide' : ''}" for="${fid}"><input type="checkbox" id="${fid}" name="${f.k}"${v ? ' checked' : ''}${dis}>${f.label}</label>`;
+      if (f.type === 'select') return `<label class="f" for="${fid}">${f.label}<select id="${fid}" name="${f.k}"${dis}>${f.opts.map(o => `<option${o === v ? ' selected' : ''}>${o}</option>`).join('')}</select></label>`;
+      const t = f.type === 'num' ? 'number' : f.type;
+      const extra = f.type === 'num' ? ' inputmode="numeric" min="0" step="1"' : f.type === 'date' ? dateAttrs() : '';
+      return `<label class="f${f.wide ? ' wide' : ''}" for="${fid}">${f.label}<input type="${t}" id="${fid}" name="${f.k}" value="${esc(v ?? '')}"${f.ph ? ` placeholder="${esc(f.ph)}"` : ''}${extra}${dis}></label>`;
+    }).join('');
+    $('saveBtn').textContent = r ? '直した内容で保存' : '追加する';
+    $('saveBtn').disabled = lock;
+    $('cancelEdit').hidden = !r;
+  }
+
+  /* ---------- 提出と現金残高確認票 ---------- */
+
+  function countFields(c) {
+    const label = v => v >= 1000 ? `${v.toLocaleString('ja-JP')}円札` : `${v}円玉`;
+    return `
+      <div class="fields">
+        <label class="f" for="cc-date">数えた日<input type="date" id="cc-date" value="${c.date || ''}"${dateAttrs()}></label>
+        <label class="f" for="cc-checker">数えた人<input type="text" id="cc-checker" value="${esc(c.checker || '')}" placeholder="例：山田"></label>
+        <label class="f" for="cc-witness">立ち会った人（任意）<input type="text" id="cc-witness" value="${esc(c.witness || '')}" placeholder="例：佐藤"></label>
+      </div>
+      <div class="table-box"><table style="min-width:0">
+        <thead><tr><th>金種</th><th class="num">枚数</th><th class="num">金額</th></tr></thead>
+        <tbody>${DENOMS.map(v => `<tr><td>${label(v)}</td><td class="num"><input type="number" id="cc-d${v}" min="0" step="1" inputmode="numeric" value="${c['d' + v] ?? ''}" style="max-width:7em" aria-label="${label(v)}の枚数"></td><td class="num" id="cc-a${v}"></td></tr>`).join('')}</tbody>
+        <tbody id="cc-summary"></tbody>
+      </table></div>
+      <label class="f" for="cc-memo" id="cc-memo-wrap">差額の理由<input type="text" id="cc-memo" value="${esc(c.memo || '')}" placeholder="例：切手代を出納帳に書き忘れていた"></label>`;
+  }
+
+  function readCount() {
+    const c = { date: $('cc-date').value, checker: $('cc-checker').value.trim(), witness: $('cc-witness').value.trim(), memo: $('cc-memo').value.trim() };
+    for (const v of DENOMS) { const n = $('cc-d' + v).value.trim(); if (n !== '') c['d' + v] = Math.max(0, Math.round(Number(n))); }
+    return c;
+  }
+
+  function diffText(diff) {
+    return diff === 0 ? '0（一致）' : (diff > 0 ? '+' : '−') + yen(Math.abs(diff)) + (diff > 0 ? '（現金が多い）' : '（現金が足りない）');
+  }
+
+  function updateCount() {
+    if (!$('cc-date')) return null;
+    const c = readCount();
+    view.countDraft = c;
+    for (const v of DENOMS) $('cc-a' + v).textContent = c['d' + v] ? yen(v * c['d' + v]) : '';
+    const actual = countTotal(c);
+    const book = c.date ? bookCashAt(c.date) : 0;
+    const diff = actual - book;
+    $('cc-summary').innerHTML = `
+      <tr class="total"><td>数えた現金の合計</td><td></td><td class="num">${yen(actual)}</td></tr>
+      <tr><td>現金出納帳の残高（${c.date ? md(c.date) : '—'}時点）</td><td></td><td class="num">${yen(book)}</td></tr>
+      <tr class="total"><td>差額</td><td></td><td class="num ${diff === 0 ? 'in' : 'out'}">${diffText(diff)}</td></tr>`;
+    $('cc-memo-wrap').hidden = diff === 0;
+    return { c, diff };
+  }
+
+  function renderSubmit() {
+    const bar = $('submitBar');
+    const m = view.month;
+    if (locked()) {
+      const c = state.counts[m];
+      const line = c ? `現金残高確認：${md(c.date)} ${esc(c.checker)}さんが確認、数えた現金 ${yen(countTotal(c))}円、差額 ${diffText(countTotal(c) - bookCashAt(c.date))}` : '';
+      const pend = pendingReq(m);
+      bar.className = 'submit-bar locked';
+      let action;
+      if (pend) action = `<div style="display:grid;gap:4px;justify-items:end"><span class="pill req">修正依頼中（事務所の確認待ち）</span></div>`;
+      else if (view.reqForm) action = `<div class="req-form"><label class="f" for="req-reason">直したい内容と理由<input type="text" id="req-reason" placeholder="例：15日の駐車場代を書き忘れていました"></label>
+        <div class="form-foot"><span class="msg" id="reqMsg" role="status"></span><div style="display:flex;gap:8px"><button type="button" class="btn ghost" id="reqCancel">やめる</button><button type="button" class="btn" id="reqSend">修正を依頼する</button></div></div></div>`;
+      else action = `<button type="button" class="btn ghost" id="reqOpen">修正を依頼する</button>`;
+      bar.innerHTML = `<div style="display:grid;gap:4px;min-width:0;flex:1 1 20em"><p>${monthName(m)}分は ${state.submitted[m]} に提出しました。事務所で確認します。</p>${line ? `<p style="font-size:13px;color:var(--ink-soft)">${line}</p>` : ''}
+        ${pend ? `<p style="font-size:13px">依頼した内容：${esc(pend.reason)}（${pend.at}）</p>` : ''}</div>${action}${historyHtml(m)}`;
+    } else if (view.submitStep === 'count') {
+      const c = view.countDraft || state.counts[m] || { date: today.startsWith(m) ? today : monthEnd(m) };
+      bar.className = 'submit-bar count';
+      bar.innerHTML = `<h3>現金残高確認票　${monthName(m)}</h3>
+        <p>提出の前に、手元の現金を金種ごとに数えて入力してください。現金出納帳の残高と比べて差額を確認します。</p>
+        ${countFields(c)}
+        <div class="form-foot"><span class="msg" id="ccMsg" role="status"></span>
+          <div style="display:flex;gap:8px"><button type="button" class="btn ghost" id="cancelSubmit">戻る</button><button type="button" class="btn" id="doSubmit">この内容で提出する</button></div></div>`;
+      updateCount();
+    } else {
+      const n = ORDER.reduce((s, k) => s + state.rows[k].filter(r => inMonth(r, m)).length, 0);
+      bar.className = 'submit-bar';
+      const again = reopened(m) ? '修正依頼が承認されたので、直せる状態です。直し終わったら、もう一度提出してください。' : `${monthName(m)}分の記入が終わったら提出してください（現在 ${n} 件）。提出の前に、現金残高確認票を記入します。`;
+      bar.innerHTML = `<p style="flex:1 1 20em">${again}</p><button type="button" class="btn" id="askSubmit">${monthName(m)}分を${reopened(m) ? '再提出' : '提出'}する</button>${historyHtml(m)}`;
+    }
+  }
+
+  function historyHtml(m) {
+    const h = state.log[m] || [];
+    if (!h.length) return '';
+    return `<details class="history" style="flex-basis:100%"><summary>この月の履歴（${h.length}件）</summary><ol>${h.map(x =>
+      `<li><time>${esc(x.at)}</time>${x.who ? `［${esc(x.who)}］` : ''}${esc(x.text)}</li>`).join('')}</ol></details>`;
+  }
+
+  $('submitBar').addEventListener('input', () => updateCount());
+  $('submitBar').addEventListener('click', e => {
+    const t = e.target.id;
+    if (t === 'askSubmit') { view.submitStep = 'count'; render(); $('cc-d10000')?.focus(); return; }
+    if (t === 'cancelSubmit') { updateCount(); view.submitStep = null; render(); return; }
+    if (t === 'reqOpen') { view.reqForm = true; render(); $('req-reason').focus(); return; }
+    if (t === 'reqCancel') { view.reqForm = false; render(); return; }
+    if (t === 'reqSend') {
+      const reason = $('req-reason').value.trim();
+      if (!reason) { $('reqMsg').textContent = '直したい内容と理由を入力してください。'; return; }
+      const at = stamp();
+      (state.requests[view.month] ||= []).push({ reason, at, status: 'pending' });
+      addLog(view.month, `修正を依頼：${reason}`);
+      view.reqForm = false; save(); render(); return;
+    }
+    if (t !== 'doSubmit') return;
+    const { c, diff } = updateCount();
+    const msgEl = $('ccMsg');
+    const fail = text => { msgEl.className = 'msg'; msgEl.textContent = text; };
+    if (!c.date || !c.date.startsWith(view.month)) return fail(`数えた日は${monthName(view.month)}の中から選んでください。`);
+    if (!c.checker) return fail('数えた人の名前を入力してください。');
+    if (!DENOMS.some(v => c['d' + v] > 0)) return fail('金種ごとの枚数を入力してください。');
+    if (diff !== 0 && !c.memo) return fail('差額があります。わかる範囲で理由を入力してください。わからなければ「不明」で構いません。');
+    if (diff === 0) delete c.memo;
+    state.counts[view.month] = c;
+    addLog(view.month, reopened(view.month) ? '再提出' : '提出');
+    const dt = new Date();
+    state.submitted[view.month] = `${dt.getMonth() + 1}月${dt.getDate()}日`;
+    view.submitStep = null; view.countDraft = null; view.editing = null; view.cashKind = null; view.draft = null;
+    save(); render();
+    $('submitBar').scrollIntoView({ block: 'nearest' });
+  });
+
+  /* ---------- 売上精算書（月ごと） ---------- */
+
+  const SR_IN = [
+    ['t10a', '定食'], ['t10b', '料理'], ['t10c', '飲み物'], ['t8a', '料理'], ['t8b', '飲み物'],
+    ['biz', '業務扱い売上（税込）'], ['meals', '従業員食事（食数）'], ['gas', 'ガス使用量（㎥）'], ['hours', '人材派遣（時間）'], ['prepaid', '前払い金'],
+  ];
+  const SR_SET = [
+    ['title', '書類の名前'], ['toName', '宛先（会社名）'], ['toAddr', '宛先の住所'], ['toReg', '宛先の登録番号'],
+    ['fromName', '発行者（会社名）'], ['fromAddr', '発行者の住所・電話'],
+    ['shutten', '出店料（円）', 1], ['rate', 'テナント料率（％）', 1], ['mealUnit', '従業員食事の単価（税込・円）', 1],
+    ['gasUnit', 'ガス単価（円/㎥）', 1], ['fee', '事務手数料（円）', 1], ['staffUnit', '人材派遣の単価（税込・円/時間）', 1],
+  ];
+  const fnum = v => { const n = Number(String(v ?? '').replace(/,/g, '')); return isFinite(n) ? n : 0; };
+  const floor = Math.floor;
+
+  // Excelの式と同じ計算（消費税は切り捨て、テナント料は四捨五入）
+  function srCalc(x, S, m) {
+    const [y, mo] = m.split('-').map(Number);
+    const pre = `${y}年${mo}月`;
+    const s10 = fnum(x.t10a) + fnum(x.t10b) + fnum(x.t10c), s8 = fnum(x.t8a) + fnum(x.t8b);
+    const A = [
+      { label: `${pre}分売上`, amt: s10 },
+      { label: '同上消費税(10%)', amt: floor(s10 * 0.1) },
+      { label: `${pre}分売上（軽減税率分）`, amt: s8 },
+      { label: '同上消費税(8%)', amt: floor(s8 * 0.08) },
+      { label: '業務扱い売上（税込）', amt: fnum(x.biz) },
+      { label: `${pre}従業員食事代（＠${yen(S.mealUnit)}円税込/食）`, qty: `${fnum(x.meals)}食分`, amt: Math.round(fnum(x.meals) * fnum(S.mealUnit)) },
+    ];
+    for (const a of x.adj || []) if (a.label && fnum(a.amt)) A.push({ label: a.label, amt: a.minus ? -fnum(a.amt) : fnum(a.amt) });
+    const tenant = Math.round((s10 + s8) * fnum(S.rate) / 100);
+    const gas = Math.round(fnum(x.gas) * fnum(S.gasUnit));
+    const B = [
+      { label: `${pre}分出店料（税込）`, amt: fnum(S.shutten) },
+      { label: `${pre}分テナント料（${fnum(S.rate)}％）`, amt: tenant },
+      { label: '同上消費税', amt: floor(tenant * 0.1) },
+      { label: `${pre}ガス代金（＠${yen(S.gasUnit)}円/㎥）`, qty: `${fnum(x.gas)}㎥`, amt: gas },
+      { label: '同上消費税', amt: floor(gas * 0.1) },
+      { label: `${pre}分事務手数料`, amt: fnum(S.fee) },
+      { label: '同上消費税', amt: floor(fnum(S.fee) * 0.1) },
+      { label: `${pre}分人材派遣料（＠${yen(S.staffUnit)}円税込/ｈ）`, qty: `${fnum(x.hours).toFixed(2)}時間`, amt: Math.round(fnum(x.hours) * fnum(S.staffUnit)) },
+    ];
+    const sumA = A.reduce((t, r) => t + r.amt, 0), sumB = B.reduce((t, r) => t + r.amt, 0);
+    const diff = sumA - sumB, prepaid = fnum(x.prepaid);
+    return { A, B, sumA, sumB, diff, prepaid, pay: diff - prepaid, s10, s8 };
+  }
+
+  function srDraft() {
+    const x = view.srDraft || state.sr[view.month] || {};
+    return { ...x, adj: (x.adj && x.adj.length ? x.adj : [{}, {}]).map(a => ({ ...a })) };
+  }
+
+  function renderSR() {
+    const m = view.month, lock = locked(), dis = lock ? ' disabled' : '';
+    const x = srDraft(); view.srDraft = x;
+    const S = state.srSet;
+    $('ledgerTitle').textContent = `売上精算書　${monthName(m)}`;
+    $('ledgerHint').textContent = 'その月の売上などを入力すると、精算額を自動で計算します。';
+    const inp = (k, label, step = '1') => `<label class="f" for="sr-${k}">${label}<input type="number" id="sr-${k}" data-sr="${k}" inputmode="decimal" min="0" step="${step}" value="${x[k] ?? ''}"${dis}></label>`;
+    const L = Object.fromEntries(SR_IN);
+    $('srBox').innerHTML = `
+      <div class="sr-grid">
+        <div class="entry">
+          <h3>${lock ? 'この月は提出済みのため直せません' : '入力する'}</h3>
+          <div class="sr-sec"><h4>支払予定日</h4><div class="fields"><label class="f" for="sr-payDate">支払予定日（ふつうは翌月末）<input type="date" id="sr-payDate" value="${x.payDate || monthEnd(shiftMonth(m, 1))}"${dis}></label></div></div>
+          <div class="sr-sec"><h4>10％の売上（税抜）</h4><div class="fields">${inp('t10a', L.t10a)}${inp('t10b', L.t10b)}${inp('t10c', L.t10c)}</div></div>
+          <div class="sr-sec"><h4>8％の売上（税抜）</h4><div class="fields">${inp('t8a', L.t8a)}${inp('t8b', L.t8b)}</div></div>
+          <div class="sr-sec"><h4>そのほかの売上</h4><div class="fields">${inp('biz', L.biz)}${inp('meals', L.meals)}</div></div>
+          <div class="sr-sec"><h4>差し引かれるもの</h4><div class="fields">${inp('gas', L.gas, '0.1')}${inp('hours', L.hours, '0.25')}${inp('prepaid', L.prepaid)}</div></div>
+          <div class="sr-sec"><h4>その他の加算・減算（任意）</h4>
+            ${x.adj.map((a, i) => `<div class="fields" style="grid-template-columns:minmax(0,2fr) minmax(0,1fr) auto;align-items:end">
+              <label class="f" for="sra-${i}-label">項目<input type="text" id="sra-${i}-label" data-adj="${i}" data-k="label" value="${esc(a.label || '')}" placeholder="例：備品立替分"${dis}></label>
+              <label class="f" for="sra-${i}-amt">金額<input type="number" id="sra-${i}-amt" data-adj="${i}" data-k="amt" min="0" step="1" value="${a.amt ?? ''}"${dis}></label>
+              <label class="check" for="sra-${i}-minus"><input type="checkbox" id="sra-${i}-minus" data-adj="${i}" data-k="minus"${a.minus ? ' checked' : ''}${dis}>差し引く</label></div>`).join('')}
+          </div>
+          <div class="form-foot"><span class="msg" id="srMsg" role="status"></span>
+            <div style="display:flex;gap:8px;flex-wrap:wrap"><button type="button" class="btn ghost" id="srPrint">印刷する</button>${lock ? '' : '<button type="button" class="btn" id="srSave">保存する</button>'}</div></div>
+        </div>
+        <div class="entry sr-calc"><h3>計算結果</h3><div class="table-box"><table id="srCalc"></table></div></div>
+      </div>
+      <details class="entry sr-settings"><summary>精算書の設定（宛先・発行者・単価）</summary>
+        <div class="fields">${SR_SET.map(([k, label, isNum]) => k.endsWith('Addr')
+          ? `<label class="f" for="srs-${k}">${label}<textarea id="srs-${k}" data-srs="${k}" rows="3" style="font:inherit;font-size:14px;padding:8px 10px;border:1px solid var(--rule);border-radius:4px;background:var(--paper);color:var(--ink)"${dis}>${esc(S[k] || '')}</textarea></label>`
+          : `<label class="f" for="srs-${k}">${label}<input type="${isNum ? 'number' : 'text'}" id="srs-${k}" data-srs="${k}" value="${esc(S[k] ?? '')}"${dis}></label>`).join('')}</div>
+        <p style="margin:0;font-size:12px;color:var(--ink-soft)">ここを変えると、すべての月の精算書に反映されます。</p>
+      </details>`;
+    updateSR();
+  }
+
+  function readSR() {
+    const x = view.srDraft;
+    document.querySelectorAll('#srBox [data-sr]').forEach(el => { x[el.dataset.sr] = el.value === '' ? undefined : Number(el.value); });
+    if ($('sr-payDate')) x.payDate = $('sr-payDate').value || monthEnd(shiftMonth(view.month, 1));
+    document.querySelectorAll('#srBox [data-adj]').forEach(el => { x.adj[el.dataset.adj][el.dataset.k] = el.type === 'checkbox' ? el.checked : el.value; });
+    return x;
+  }
+
+  function updateSR() {
+    const r = srCalc(readSR(), state.srSet, view.month);
+    const row = (o, cls = '') => `<tr class="${cls}"><td>${esc(o.label)}</td><td class="q">${o.qty || ''}</td><td class="num">${yen(o.amt)}</td></tr>`;
+    $('srCalc').innerHTML = `<tbody>
+      <tr class="sub"><td colspan="3">Ａ表　売上金額</td></tr>${r.A.map(o => row(o)).join('')}
+      <tr class="total"><td>Ａ表の合計</td><td></td><td class="num">${yen(r.sumA)}</td></tr>
+      <tr class="sub"><td colspan="3">Ｂ表　支払金額</td></tr>${r.B.map(o => row(o)).join('')}
+      <tr class="total"><td>Ｂ表の合計</td><td></td><td class="num">${yen(r.sumB)}</td></tr>
+      ${row({ label: '差引金額（Ａ表−Ｂ表）①', amt: r.diff })}${row({ label: '前払い金 ②', amt: r.prepaid })}
+      <tr class="grand"><td>支払金額（①−②）</td><td></td><td class="num">${yen(r.pay)}</td></tr></tbody>`;
+  }
+
+  function srMsg(t, ok) { const el = $('srMsg'); el.className = 'msg' + (ok ? ' ok' : ''); el.textContent = t; }
+
+  $('srBox').addEventListener('input', e => {
+    const k = e.target.dataset.srs;
+    if (k) { state.srSet[k] = e.target.type === 'number' ? fnum(e.target.value) : e.target.value; save(); }
+    updateSR();
+  });
+  $('srBox').addEventListener('click', async e => {
+    if (e.target.id === 'srSave') {
+      const x = readSR();
+      if (!(fnum(x.t10a) + fnum(x.t10b) + fnum(x.t10c) + fnum(x.t8a) + fnum(x.t8b))) return srMsg('売上を入力してください。');
+      state.sr[view.month] = JSON.parse(JSON.stringify(x));
+      if (reopened(view.month)) addLog(view.month, `修正：売上精算書 支払金額 ${yen(srCalc(x, state.srSet, view.month).pay)}円`);
+      save(); renderTabs(); renderPay(); srMsg('保存しました。', true);
+    }
+    if (e.target.id === 'srPrint') {
+      try {
+        openPrint(`${state.srSet.title}_${monthName(view.month)}.html`, srDoc(readSR(), state.srSet, view.month));
+        srMsg('新しいタブで開きました。印刷してください。', true);
+      } catch (err) { srMsg(err?.code === 'declined' ? '保存をやめました。' : '保存できませんでした。'); }
+    }
+  });
+
+  function srDoc(x, S, m) {
+    const r = srCalc(x, S, m);
+    const t = new Date();
+    const wa = `令和${t.getFullYear() - 2018}年${t.getMonth() + 1}月${t.getDate()}日`;
+    const [py, pm, pdd] = (x.payDate || monthEnd(shiftMonth(m, 1))).split('-').map(Number);
+    const payWa = `令和${py - 2018}年${pm}月${pdd}日`;
+    const br = v => esc(v || '').replace(/\n/g, '<br>');
+    const line = o => `<tr><td class="l">${esc(o.label)}</td><td class="q">${o.qty || ''}</td><td class="n">¥${yen(o.amt)}</td></tr>`;
+    const pad = (rows, n) => rows + '<tr><td class="l">&nbsp;</td><td class="q"></td><td class="n"></td></tr>'.repeat(Math.max(0, n));
+    return `<!doctype html><html lang="ja"><head><meta charset="utf-8"><title>${esc(S.title)} ${monthName(m)}</title>
+<style>
+@page { size: A4 portrait; margin: 0; }
+* { box-sizing: border-box; }
+html, body { margin: 0; background: #e9e9e9; }
+body { font-family: "Hiragino Mincho ProN", "Yu Mincho", "MS Mincho", serif; color: #000; font-size: 10.5pt; }
+.bar { font-family: sans-serif; background: #eef3f0; padding: 8px 12px; font-size: 10pt; display: flex; gap: 12px; align-items: center; justify-content: center; }
+.bar button { font-size: 11pt; padding: 6px 14px; }
+.page { width: 210mm; height: 297mm; margin: 8mm auto; padding: 12mm 16mm; background: #fff; display: flex; flex-direction: column; gap: 3.5mm; overflow: hidden; box-shadow: 0 1px 6px rgba(0,0,0,.2); }
+@media print { html, body { background: #fff; } .bar { display: none; } .page { margin: 0; box-shadow: none; } }
+.top { display: flex; justify-content: space-between; align-items: flex-start; }
+.to { font-size: 15pt; border-bottom: 1px solid #000; padding-bottom: 1mm; }
+.addr { font-size: 9.5pt; line-height: 1.5; margin-top: 2mm; }
+h1 { text-align: center; font-size: 20pt; letter-spacing: .6em; margin: 2mm 0 0; }
+.lead { margin: 0; }
+.pay { display: flex; align-items: baseline; gap: 6mm; border-bottom: 2px solid #000; padding: 0 2mm 1mm; width: 60%; }
+.pay b { font-size: 18pt; }
+.pay span.k { font-size: 11pt; }
+.pay span.f { margin-left: auto; font-size: 11pt; }
+.blk { display: grid; grid-template-columns: 22mm 1fr; border: 1px solid #000; }
+.blk .h { border-right: 1px solid #000; display: grid; place-items: center; text-align: center; font-size: 10pt; padding: 2mm; }
+.blk .h b { display: block; font-size: 12pt; margin-bottom: 2mm; }
+table { width: 100%; border-collapse: collapse; }
+td, th { border-bottom: 1px solid #000; padding: 1mm 2mm; height: 5.8mm; }
+th { font-weight: normal; background: #f0f0f0; text-align: left; }
+th.n { text-align: right; }
+td.q { text-align: right; width: 22mm; white-space: nowrap; font-size: 9.5pt; }
+td.n, th.n { text-align: right; width: 34mm; border-left: 1px solid #000; font-family: "Courier New", monospace; white-space: nowrap; }
+tr.sum td { font-weight: bold; border-top: 1.5px solid #000; border-bottom: 0; }
+.final { width: 70%; margin-left: auto; border: 1px solid #000; }
+.final td { font-size: 11pt; }
+.final tr:last-child td { font-weight: bold; font-size: 12pt; border-bottom: 0; }
+.foot { margin-top: auto; display: flex; justify-content: flex-end; gap: 8mm; align-items: flex-end; }
+.from { font-size: 10pt; line-height: 1.5; }
+.from b { font-size: 12pt; display: block; }
+.stamps { display: grid; grid-template-columns: repeat(3, 18mm); border: 1px solid #000; }
+.stamps div { border-left: 1px solid #000; text-align: center; font-size: 9pt; }
+.stamps div:first-child { border-left: 0; }
+.stamps span { display: block; border-bottom: 1px solid #000; padding: 1mm; }
+.stamps i { display: block; height: 14mm; }
+</style></head><body>
+<div class="bar"><button onclick="window.print()">印刷する</button><span>A4縦で印刷してください。印刷画面が開かないときは、このボタンを押してください。</span></div>
+<div class="page">
+  <div class="top">
+    <div><div class="to">${esc(S.toName)}　御中</div><div class="addr">${br(S.toAddr)}${S.toReg ? `<br>登録番号　${esc(S.toReg)}` : ''}</div></div>
+    <div>作成日　${wa}</div>
+  </div>
+  <h1>${esc(S.title)}</h1>
+  <p class="lead">${payWa}予定で下記の通り、お支払い申し上げます。</p>
+  <div class="pay"><span class="k">支払金額</span><b>¥${yen(r.pay)}－</b><span class="f">確定</span></div>
+  <div class="blk"><div class="h"><div><b>Ａ表</b>貴社の<br>売上金額</div></div>
+    <table><tr><th>詳細内訳</th><th></th><th class="n">金額</th></tr>${pad(r.A.map(line).join(''), 7 - r.A.length)}<tr class="sum"><td>合計</td><td></td><td class="n">¥${yen(r.sumA)}</td></tr></table></div>
+  <div class="blk"><div class="h"><div><b>Ｂ表</b>弊社への<br>支払金額</div></div>
+    <table><tr><th>詳細内訳</th><th></th><th class="n">金額</th></tr>${r.B.map(line).join('')}<tr class="sum"><td>合計</td><td></td><td class="n">¥${yen(r.sumB)}</td></tr></table></div>
+  <table class="final">
+    <tr><td>差引金額（Ａ表−Ｂ表）　①</td><td class="n">¥${yen(r.diff)}</td></tr>
+    <tr><td>前払い金　②</td><td class="n">¥${yen(r.prepaid)}</td></tr>
+    <tr><td>支払金額　①−②</td><td class="n">¥${yen(r.pay)}</td></tr>
+  </table>
+  <div class="foot">
+    <div class="from"><b>${esc(S.fromName)}</b>${br(S.fromAddr)}</div>
+    <div class="stamps"><div><span>承認</span><i></i></div><div><span>経理</span><i></i></div><div><span>担当</span><i></i></div></div>
+  </div>
+</div>
+<script>window.addEventListener('load', () => setTimeout(() => window.print(), 300));<\/script>
+</body></html>`;
+  }
+
+  /* ---------- 入金確認（売上精算書の支払金額） ---------- */
+
+  function payRows() {
+    if (!state.sr) return [];
+    return Object.keys(state.sr).sort().reverse().map(m => {
+      const x = state.sr[m];
+      const due = x.payDate || monthEnd(shiftMonth(m, 1));
+      const plan = srCalc(x, state.srSet, m).pay;
+      const p = (state.srPaid || {})[m];
+      const got = p ? fnum(p.amount) : 0;
+      let st;
+      if (p && got >= plan) st = { cls: 'locked', label: '入金済み' };
+      else if (p && got > 0) st = { cls: 'part', label: '一部入金' };
+      else if (today > due) st = { cls: 'late', label: '期限を過ぎています' };
+      else st = { cls: 'open', label: '入金待ち' };
+      return { m, due, plan, p, got, diff: p ? got - plan : null, st };
+    });
+  }
+
+  // 預金出納帳から、同じ金額の入金を探す
+  function payCandidate(r) {
+    return state.rows.bank.find(b => b.in === r.plan && b.date >= `${r.m}-01` && !Object.values(state.srPaid || {}).some(p => p.bankId === b.id));
+  }
+
+  function renderPay() {
+    const rows = payRows();
+    const waiting = rows.filter(r => !r.p || r.got < r.plan);
+    const late = rows.filter(r => r.st.cls === 'late');
+    const md2 = s2 => { const [y2, a, b2] = s2.split('-'); return `${y2}/${Number(a)}/${Number(b2)}`; };
+    let h = `<div class="ledger-head" style="margin-top:12px"><h2>入金確認</h2><p>売上精算書の支払金額が、予定日までに入金されたかを確認します。</p></div>
+      <div class="chips">
+      <span class="chip">入金待ち <b>${waiting.length}</b> 件・<b>${yen(waiting.reduce((t, r) => t + r.plan - r.got, 0))}</b> 円</span>
+      ${late.length ? `<span class="chip" style="color:var(--out);border-color:var(--out)">期限を過ぎた入金 <b style="color:var(--out)">${late.length}</b> 件</span>` : ''}</div>
+      <div class="table-box"><table><thead><tr><th>精算書の月</th><th>支払予定日</th><th class="num">予定額</th><th>入金日</th><th class="num">入金額</th><th class="num">差額</th><th>状況</th><th></th></tr></thead><tbody>`;
+    if (!rows.length) h += `<tr><td colspan="8" class="empty">まだ売上精算書がありません。「売上精算書」タブで保存すると、ここに出ます。</td></tr>`;
+    for (const r of rows) {
+      const editing = view.payEdit === r.m;
+      h += `<tr class="${editing ? 'editing' : ''}"><td>${monthName(r.m)}分</td><td class="date">${md2(r.due)}</td><td class="num">${yen(r.plan)}</td>
+        <td class="date">${r.p?.date ? md2(r.p.date) : ''}</td><td class="num">${r.p ? yen(r.got) : ''}</td>
+        <td class="num ${r.diff ? 'out' : ''}">${r.diff === null ? '' : r.diff === 0 ? '0' : (r.diff > 0 ? '+' : '−') + yen(Math.abs(r.diff))}</td>
+        <td><span class="pill ${r.st.cls}">${r.st.label}</span>${r.p?.memo ? `<div style="font-size:12px;color:var(--ink-soft)">${esc(r.p.memo)}</div>` : ''}</td>
+        <td><div class="row-actions">${editing ? '' : `<button type="button" class="link-btn" data-payedit="${r.m}">${r.p ? '直す' : '入金を記録'}</button>`}</div></td></tr>`;
+      if (editing) {
+        const c = null;
+        h += `<tr class="editing"><td colspan="8"><div class="pay-edit">
+          ${c ? `<div class="cand"><span>預金出納帳に ${md2(c.date)}「${esc(c.desc)}${c.partner ? '・' + esc(c.partner) : ''}」${yen(c.in)}円 の入金があります。</span><button type="button" class="btn ghost" data-usecand="${c.id}">この入金を使う</button></div>` : ''}
+          <div class="fields">
+            <label class="f" for="pay-date">入金日<input type="date" id="pay-date" value="${r.p?.date || ''}"></label>
+            <label class="f" for="pay-amount">入金額（円）<input type="number" id="pay-amount" min="0" step="1" inputmode="numeric" value="${r.p ? r.got : r.plan}"></label>
+            <label class="f wide" for="pay-memo">メモ（任意）<input type="text" id="pay-memo" value="${esc(r.p?.memo || '')}" placeholder="例：振込手数料 440円 差し引き"></label>
+          </div>
+          <div class="form-foot"><span class="msg" id="payMsg" role="status"></span>
+            <div style="display:flex;gap:8px;flex-wrap:wrap">${r.p ? '<button type="button" class="btn ghost" id="payClear">記録を消す</button>' : ''}<button type="button" class="btn ghost" id="payCancel">やめる</button><button type="button" class="btn" id="paySave">保存する</button></div></div>
+        </div></td></tr>`;
+      }
+    }
+    $('payBox').innerHTML = h + '</tbody></table></div>';
+  }
+
+  $('payBox').addEventListener('click', e => {
+    const t = e.target;
+    if (t.dataset.payedit) { view.payEdit = t.dataset.payedit; renderPay(); $('pay-date').focus(); return; }
+    if (t.id === 'payCancel') { view.payEdit = null; renderPay(); return; }
+    if (t.dataset.usecand) {
+      const b = state.rows.bank.find(x => x.id === t.dataset.usecand);
+      $('pay-date').value = b.date; $('pay-amount').value = b.in; view.payBank = b.id; return;
+    }
+    if (t.id === 'payClear') { delete state.srPaid[view.payEdit]; view.payEdit = null; save(); render(); return; }
+    if (t.id === 'paySave') {
+      const date = $('pay-date').value, amount = num($('pay-amount').value), memo = $('pay-memo').value.trim();
+      const m = $('payMsg');
+      if (!date) { m.textContent = '入金日を入力してください。'; return; }
+      if (!amount) { m.textContent = '入金額を入力してください。'; return; }
+      (state.srPaid ||= {})[view.payEdit] = { date, amount, ...(memo && { memo }), ...(view.payBank && { bankId: view.payBank }) };
+      view.payEdit = null; view.payBank = null; save(); render();
+    }
+  });
+
+  /* ---------- 仕入一覧（請求書の一覧） ---------- */
+
+  const SITES = ['当月末', '翌5日', '翌10日', '翌15日', '翌20日', '翌25日', '翌末', '翌々5日', '翌々10日', '翌々15日', '翌々20日', '翌々末'];
+  const ACCT_TYPES = ['普通', '当座'];
+  // 締め日（月末）と支払サイトから支払期日を出す
+  function dueOf(m, site) {
+    const mm = /^(当月|翌々|翌)(末|(\d+)日)$/.exec(site || '');
+    if (!mm) return '';
+    const tm = shiftMonth(m, mm[1] === '当月' ? 0 : mm[1] === '翌' ? 1 : 2);
+    if (mm[2] === '末') return monthEnd(tm);
+    const end = monthEnd(tm);
+    const dd = `${tm}-${String(Number(mm[3])).padStart(2, '0')}`;
+    return dd > end ? end : dd;
+  }
+  const plInv = (m, sid) => ((state.inv || {})[m] || {})[sid] || {};
+  const plTotal = o => (o.t10 || 0) + (o.t8 || 0) + (o.ot || 0);
+  const plInvoices = m => (state.suppliers || []).filter(sp => plTotal(plInv(m, sp.id)) > 0);
+  const plPay = (sp, o) => plTotal(o) ? plTotal(o) - (sp.fee || 0) : 0;
+  const plPaidOf = (m, sid) => ((state.plPaid || {})[m] || {})[sid] || {};
+  function plStatus(m, sp) {
+    const o = plInv(m, sp.id); if (!plTotal(o)) return null;
+    const need = plTotal(o), p = plPaidOf(m, sp.id), got = p.date ? (p.amount || 0) + (p.fee || 0) : 0;
+    if (p.date && got >= need) return { cls: 'locked', label: '支払済み', need, got };
+    if (p.date && got > 0) return { cls: 'part', label: '一部支払い', need, got };
+    if (today > dueOf(m, sp.site)) return { cls: 'late', label: '期日を過ぎています', need, got };
+    return { cls: 'open', label: '未払い', need, got };
+  }
+  const ymd = s2 => { const [a, b2, c] = s2.split('-'); return `${a}/${Number(b2)}/${Number(c)}`; };
+
+  // 買掛金の残高：その日までの請求額 − その日までの支払（振込額＋手数料）。請求の月は問わない
+  function apBalance(sid, endDate) {
+    let bal = 0;
+    for (const [m, inv] of Object.entries(state.inv || {})) if (monthEnd(m) <= endDate && inv[sid]) bal += plTotal(inv[sid]);
+    for (const ps of Object.values(state.plPaid || {})) { const p = ps[sid]; if (p?.date && p.date <= endDate) bal -= (p.amount || 0) + (p.fee || 0); }
+    return bal;
+  }
+  function apPaidIn(sid, m) {
+    let t = 0;
+    for (const ps of Object.values(state.plPaid || {})) { const p = ps[sid]; if (p?.date?.startsWith(m)) t += (p.amount || 0) + (p.fee || 0); }
+    return t;
+  }
+
+  function plSorted() {
+    const order = s2 => SITES.indexOf(s2.site);
+    return (state.suppliers || []).slice().sort((a, b) => order(a) - order(b) || String(a.cat).localeCompare(String(b.cat), 'ja', { numeric: true }));
+  }
+
+  function renderPL() {
+    const m = view.month, lock = locked(), dis = lock ? ' disabled' : '';
+    $('ledgerTitle').textContent = `仕入一覧（請求書）　${monthName(m)}締め`;
+    $('ledgerHint').textContent = `${monthName(m)}末締めで届いた請求書の金額を、税率ごとに入れてください（税込）。届いていない業者は空欄のままで構いません。`;
+    let h = `<div class="chips" id="plChips"></div>
+      <div class="table-box"><table class="pl"><thead><tr><th>分類</th><th>業者名</th><th>支払サイト</th><th>支払期日</th>
+        <th class="num">10%対象</th><th class="num">8%対象</th><th class="num">その他</th><th class="num">請求額</th><th class="num">手数料（予定）</th><th class="num">振込予定額</th><th>振込日</th><th class="num">振込額</th><th class="num">振込手数料</th><th>状況</th><th>振込先</th></tr></thead><tbody>`;
+    let lastSite = null;
+    for (const sp of plSorted()) {
+      if (sp.site !== lastSite) { h += `<tr class="grp"><td colspan="15">支払サイト：${esc(sp.site)}（支払期日 ${ymd(dueOf(m, sp.site))}）</td></tr>`; lastSite = sp.site; }
+      const o = plInv(m, sp.id);
+      const cell = k => `<td class="num"><input type="number" id="pl-${sp.id}-${k}" data-pl="${sp.id}" data-k="${k}" min="0" step="1" inputmode="numeric" value="${o[k] ?? ''}" aria-label="${esc(sp.name)} ${k === 't10' ? '10%対象' : k === 't8' ? '8%対象' : 'その他'}"${dis}></td>`;
+      h += `<tr id="plr-${sp.id}" class="${plTotal(o) ? '' : 'noinv'}"><td class="num">${esc(sp.cat)}</td><td>${esc(sp.name)}</td><td>${esc(sp.site)}</td><td class="date">${ymd(dueOf(m, sp.site))}</td>
+        ${cell('t10')}${cell('t8')}${cell('ot')}
+        <td class="num" id="pl-${sp.id}-sum"></td><td class="num">${yen(sp.fee || 0)}</td><td class="num" id="pl-${sp.id}-pay"></td>
+        <td class="date" id="pl-${sp.id}-pdate"></td><td class="num" id="pl-${sp.id}-pamt"></td><td class="num" id="pl-${sp.id}-pfee"></td>
+        <td id="pl-${sp.id}-st"></td>
+        <td class="bank">${esc(sp.bank)} ${esc(sp.branch)}<br>${esc(sp.type)} ${esc(sp.acct)}</td></tr>`;
+    }
+    if (!(state.suppliers || []).length) h += `<tr><td colspan="15" class="empty">業者がまだ登録されていません。下の「業者の登録」から追加してください。</td></tr>`;
+    h += `</tbody><tbody id="plFoot"></tbody></table></div>
+      <div class="pl-sum">
+        <div class="entry"><h3>支払期日ごとの合計（振込額）</h3><div class="table-box"><table id="plDue"></table></div></div>
+        <div class="entry"><h3>税率ごとの合計（請求額）</h3><div class="table-box"><table id="plTax"></table></div>
+          <div class="form-foot"><span class="msg" id="plMsg" role="status"></span><button type="button" class="btn ghost" id="plPrint">印刷する</button></div></div>
+      </div>
+      <div id="plPayPanel"></div>
+      <div class="entry"><h3 id="plBalTitle">買掛金の月末残高</h3>
+        <p style="margin:0;font-size:12px;color:var(--ink-soft)">前の月までに払い残した分も含めた、月末時点の未払い残高です。支払は、どの月の請求書の分でも振込日の月で数えます。</p>
+        <div class="table-box"><table id="plBal" style="min-width:640px"></table></div></div>
+      ${plMasterHtml()}`;
+    $('plBox').innerHTML = h;
+    updatePL();
+  }
+
+  function updatePL() {
+    const m = view.month;
+    const sps = state.suppliers || [];
+    let t = { t10: 0, t8: 0, ot: 0, sum: 0, fee: 0, pay: 0, paid: 0, paidAmt: 0, paidFee: 0, left: 0 }, n = 0;
+    const due = {}, dueLeft = {};
+    for (const sp of sps) {
+      const o = plInv(m, sp.id), sum = plTotal(o), pay = plPay(sp, o);
+      if ($(`pl-${sp.id}-sum`)) { $(`pl-${sp.id}-sum`).textContent = sum ? yen(sum) : ''; $(`pl-${sp.id}-pay`).textContent = sum ? yen(pay) : ''; }
+      $(`plr-${sp.id}`)?.classList.toggle('noinv', !sum);
+      const st = plStatus(m, sp);
+      if ($(`pl-${sp.id}-st`)) {
+        $(`pl-${sp.id}-st`).innerHTML = st ? `<span class="pill ${st.cls}">${st.label}</span>` : '';
+        const pp0 = plPaidOf(m, sp.id);
+        $(`pl-${sp.id}-pdate`).textContent = pp0.date ? ymd(pp0.date) : '';
+        $(`pl-${sp.id}-pamt`).textContent = pp0.date ? yen(pp0.amount || 0) : '';
+        $(`pl-${sp.id}-pfee`).textContent = pp0.date ? yen(pp0.fee || 0) : '';
+      }
+      if (!sum) continue;
+      const pp = plPaidOf(m, sp.id);
+      if (pp.date) { t.paidAmt += pp.amount || 0; t.paidFee += pp.fee || 0; }
+      t.left += Math.max(0, st.need - st.got);
+      n++; for (const k of ['t10', 't8', 'ot']) t[k] += o[k] || 0;
+      t.sum += sum; t.fee += sp.fee || 0; t.pay += pay;
+      const dd = dueOf(m, sp.site); due[dd] = (due[dd] || 0) + pay; dueLeft[dd] = (dueLeft[dd] || 0) + Math.max(0, st.need - st.got);
+    }
+    $('plFoot').innerHTML = `<tr class="total"><td></td><td>合計（${n}社）</td><td></td><td></td><td class="num">${yen(t.t10)}</td><td class="num">${yen(t.t8)}</td><td class="num">${yen(t.ot)}</td><td class="num">${yen(t.sum)}</td><td class="num">${yen(t.fee)}</td><td class="num">${yen(t.pay)}</td><td></td><td class="num">${yen(t.paidAmt)}</td><td class="num">${yen(t.paidFee)}</td><td></td><td></td></tr>`;
+    $('plDue').innerHTML = `<thead><tr><th>支払期日</th><th class="num">振込予定額</th><th class="num">未払い</th><th></th></tr></thead><tbody>${Object.keys(due).sort().map(dd => `<tr><td class="date">${ymd(dd)}</td><td class="num">${yen(due[dd])}</td>
+        <td class="num ${dueLeft[dd] && today > dd ? 'out' : ''}">${dueLeft[dd] ? yen(dueLeft[dd]) : '0'}</td>
+        <td><div style="display:grid;gap:4px;justify-items:start">${dueLeft[dd] ? (today > dd ? '<span class="pill late">期日を過ぎています</span>' : '') : '<span class="pill locked">支払済み</span>'}
+          <button type="button" class="link-btn" data-paydue="${dd}">${dueLeft[dd] ? 'まとめて支払済みにする' : '支払を直す'}</button></div></td></tr>`).join('') || '<tr><td colspan="4" class="empty">請求額を入れると出ます</td></tr>'}
+      <tr class="total"><td>合計</td><td class="num">${yen(t.pay)}</td><td class="num">${yen(t.left)}</td><td></td></tr></tbody>`;
+    renderPayPanel();
+    const end = monthEnd(m), prevEnd = monthEnd(shiftMonth(m, -1));
+    const bal = sps.map(sp => ({ sp, prev: apBalance(sp.id, prevEnd), inv: plTotal(plInv(m, sp.id)), paid: apPaidIn(sp.id, m), end: apBalance(sp.id, end) }))
+      .filter(r => r.prev || r.inv || r.paid || r.end);
+    const tb = bal.reduce((a, r) => ({ prev: a.prev + r.prev, inv: a.inv + r.inv, paid: a.paid + r.paid, end: a.end + r.end }), { prev: 0, inv: 0, paid: 0, end: 0 });
+    $('plBalTitle').textContent = `買掛金の月末残高（${monthName(m)}末）`;
+    $('plBal').innerHTML = `<thead><tr><th>業者名</th><th class="num">前月末の残高</th><th class="num">今月の請求額</th><th class="num">今月の支払</th><th class="num">月末の残高</th></tr></thead><tbody>
+      ${bal.map(r => `<tr><td>${esc(r.sp.name)}</td><td class="num">${yen(r.prev)}</td><td class="num">${yen(r.inv)}</td><td class="num">${yen(r.paid)}</td><td class="num${r.end < 0 ? ' out' : ''}">${yen(r.end)}</td></tr>`).join('') || '<tr><td colspan="5" class="empty">まだ残高はありません</td></tr>'}
+      <tr class="total"><td>合計</td><td class="num">${yen(tb.prev)}</td><td class="num">${yen(tb.inv)}</td><td class="num">${yen(tb.paid)}</td><td class="num">${yen(tb.end)}</td></tr></tbody>`;
+    $('plTax').innerHTML = `<tbody><tr><td>10%対象</td><td class="num">${yen(t.t10)}</td></tr><tr><td>8%対象（軽減）</td><td class="num">${yen(t.t8)}</td></tr><tr><td>その他</td><td class="num">${yen(t.ot)}</td></tr><tr class="total"><td>請求額の合計</td><td class="num">${yen(t.sum)}</td></tr></tbody>`;
+    const lateN = (state.suppliers || []).filter(sp => plStatus(m, sp)?.cls === 'late').length;
+    $('plChips').innerHTML = `<span class="chip">請求書 <b>${n}</b> 社</span><span class="chip">請求額 <b>${yen(t.sum)}</b></span><span class="chip">振込額 <b>${yen(t.pay)}</b></span><span class="chip">振込済み <b>${yen(t.paidAmt)}</b></span><span class="chip">振込手数料 <b>${yen(t.paidFee)}</b></span><span class="chip">今月分の未払い <b>${yen(t.left)}</b></span>` +
+      (lateN ? `<span class="chip" style="color:var(--out);border-color:var(--out)">期日を過ぎた未払い <b style="color:var(--out)">${lateN}</b> 社</span>` : '');
+    $('plChips').insertAdjacentHTML('beforeend', `<span class="chip">月末の買掛金残高（過去の月を含む） <b>${yen(tb.end)}</b></span>`);
+    return { t, due, n };
+  }
+
+  function plMasterHtml() {
+    const e = view.plEdit ? (state.suppliers || []).find(x => x.id === view.plEdit) || {} : null;
+    const f = (k, label, extra = '') => `<label class="f" for="sp-${k}">${label}<input type="text" id="sp-${k}" value="${esc(e?.[k] ?? '')}"${extra}></label>`;
+    const sel = (k, label, opts) => `<label class="f" for="sp-${k}">${label}<select id="sp-${k}">${opts.map(o => `<option${o === (e?.[k] || opts[0]) ? ' selected' : ''}>${o}</option>`).join('')}</select></label>`;
+    return `<details class="entry pl-master"${view.plMasterOpen ? ' open' : ''}><summary>業者の登録（${(state.suppliers || []).length}社）</summary>
+      <div class="table-box"><table><thead><tr><th>分類</th><th>番号</th><th>業者名</th><th>支払サイト</th><th>銀行・支店</th><th>預金</th><th>口座番号</th><th class="num">振込手数料</th><th></th></tr></thead><tbody>
+      ${plSorted().map(sp => `<tr><td>${esc(sp.cat)}</td><td>${esc(sp.no)}</td><td>${esc(sp.name)}</td><td>${esc(sp.site)}</td><td>${esc(sp.bank)} ${esc(sp.branch)}</td><td>${esc(sp.type)}</td><td>${esc(sp.acct)}</td><td class="num">${yen(sp.fee || 0)}</td>
+        <td><div class="row-actions"><button type="button" class="link-btn" data-spedit="${sp.id}">直す</button><button type="button" class="link-btn danger" data-spdel="${sp.id}">${view.spDel === sp.id ? '本当に消す' : '消す'}</button></div></td></tr>`).join('')}
+      </tbody></table></div>
+      <h3 style="margin:0">${e ? '業者を直す' : '業者を追加する'}</h3>
+      <div class="fields">
+        ${f('cat', '業者分類')}${f('no', '業者番号')}${f('name', '業者名')}${sel('site', '支払サイト', SITES.slice().sort((a, b) => a === '翌末' ? -1 : b === '翌末' ? 1 : 0))}
+        ${f('bank', '銀行名')}${f('branch', '支店名')}${sel('type', '預金', ACCT_TYPES)}${f('acct', '口座番号', ' inputmode="numeric"')}
+        <label class="f" for="sp-fee">振込手数料（先方負担分・円）<input type="number" id="sp-fee" min="0" step="1" value="${e?.fee ?? 0}"></label>
+      </div>
+      <div class="form-foot"><span class="msg" id="spMsg" role="status"></span><div style="display:flex;gap:8px">${e ? '<button type="button" class="btn ghost" id="spCancel">やめる</button>' : ''}<button type="button" class="btn" id="spSave">${e ? '直した内容で保存' : '追加する'}</button></div></div>
+    </details>`;
+  }
+
+  $('plBox').addEventListener('input', e => {
+    const t = e.target; if (!t.dataset.pl || locked()) return;
+    const m = view.month;
+    const o = (((state.inv ||= {})[m] ||= {})[t.dataset.pl] ||= {});
+    const v = num(t.value); if (v) o[t.dataset.k] = v; else delete o[t.dataset.k];
+    save(); updatePL();
+  });
+  // 支払期日ごとの業者一覧で、振込日・振込額・振込手数料をまとめて入れる
+  function renderPayPanel() {
+    const box = $('plPayPanel'); if (!box) return;
+    const dd = view.payDue, m = view.month;
+    if (!dd) { box.innerHTML = ''; return; }
+    const list = plSorted().filter(sp => plTotal(plInv(m, sp.id)) && dueOf(m, sp.site) === dd);
+    if (box.dataset.for === dd && box.innerHTML) return;   // 入力中は描き直さない
+    box.dataset.for = dd;
+    const defDate = dd > today ? today : dd;
+    box.innerHTML = `<div class="entry" style="border:2px solid var(--accent)">
+      <h3>支払期日 ${ymd(dd)} の支払（${list.length}社）</h3>
+      <p style="margin:0;font-size:12px;color:var(--ink-soft)">実際に振り込んだ日・金額・手数料を入れて「支払済みにする」を押してください。最初は予定の金額が入っています。払っていない業者はチェックを外してください。</p>
+      <label class="f" for="pp-all" style="max-width:14em">振込日をまとめて入れる<input type="date" id="pp-all" value="${defDate}"></label>
+      <div class="table-box"><table style="min-width:640px"><thead><tr><th></th><th>業者名</th><th class="num">請求額</th><th class="num">振込予定額</th><th>振込日</th><th class="num">振込額</th><th class="num">振込手数料</th></tr></thead><tbody>
+      ${list.map(sp => { const o = plInv(m, sp.id), pp = plPaidOf(m, sp.id), st = plStatus(m, sp);
+        return `<tr><td><input type="checkbox" id="pp-${sp.id}-on" data-ppon="${sp.id}"${st.cls === 'locked' && !pp.date ? '' : ' checked'} aria-label="${esc(sp.name)}を支払済みにする"></td>
+          <td>${esc(sp.name)}</td><td class="num">${yen(plTotal(o))}</td><td class="num">${yen(plPay(sp, o))}</td>
+          <td><input type="date" id="pp-${sp.id}-date" data-ppd="${sp.id}" value="${pp.date || defDate}" style="width:10em"></td>
+          <td class="num"><input type="number" id="pp-${sp.id}-amt" min="0" step="1" inputmode="numeric" value="${pp.date ? pp.amount ?? '' : plPay(sp, o)}" style="width:8em"></td>
+          <td class="num"><input type="number" id="pp-${sp.id}-fee" min="0" step="1" inputmode="numeric" value="${pp.date ? pp.fee ?? 0 : sp.fee || 0}" style="width:6em"></td></tr>`; }).join('')}
+      </tbody></table></div>
+      <div class="form-foot"><span class="msg" id="ppMsg" role="status"></span>
+        <div style="display:flex;gap:8px"><button type="button" class="btn ghost" id="ppCancel">やめる</button><button type="button" class="btn" id="ppSave">支払済みにする</button></div></div>
+    </div>`;
+  }
+
+  $('plBox').addEventListener('input', e => {
+    if (e.target.id === 'pp-all') document.querySelectorAll('#plPayPanel [data-ppd]').forEach(el => { el.value = e.target.value; });
+  });
+  $('plBox').addEventListener('change', e => {
+    const t = e.target; if (!t.dataset.pl || !reopened(view.month)) return;
+    const sp = state.suppliers.find(x => x.id === t.dataset.pl);
+    addLog(view.month, `修正：仕入一覧 ${sp.name} 請求額 ${yen(plTotal(plInv(view.month, sp.id)))}円`); save(); renderTabs();
+  });
+  $('plBox').addEventListener('toggle', e => { if (e.target.classList?.contains('pl-master')) view.plMasterOpen = e.target.open; }, true);
+  $('plBox').addEventListener('click', async e => {
+    const t = e.target;
+    if (t.dataset.spedit) { view.plEdit = t.dataset.spedit; view.plMasterOpen = true; renderPL(); $('sp-name').focus(); return; }
+    if (t.dataset.spdel) {
+      if (view.spDel !== t.dataset.spdel) { view.spDel = t.dataset.spdel; renderPL(); return; }
+      state.suppliers = state.suppliers.filter(x => x.id !== t.dataset.spdel); view.spDel = null; save(); render(); return;
+    }
+    if (t.id === 'spCancel') { view.plEdit = null; renderPL(); return; }
+    if (t.id === 'spSave') {
+      const rec = {};
+      for (const k of ['cat', 'no', 'name', 'site', 'bank', 'branch', 'type', 'acct']) rec[k] = $('sp-' + k).value.trim();
+      rec.fee = num($('sp-fee').value) || 0;
+      if (!rec.name) { $('spMsg').textContent = '業者名を入力してください。'; return; }
+      state.suppliers ||= [];
+      if (view.plEdit) Object.assign(state.suppliers.find(x => x.id === view.plEdit), rec);
+      else state.suppliers.push({ id: id(), ...rec });
+      view.plEdit = null; save(); render(); return;
+    }
+    if (t.dataset.paydue) { view.payDue = t.dataset.paydue; $('plPayPanel').dataset.for = ''; renderPayPanel(); $('pp-all')?.focus(); return; }
+    if (t.id === 'ppCancel') { view.payDue = null; renderPayPanel(); return; }
+    if (t.id === 'ppSave') {
+      const m = view.month, ids = [...document.querySelectorAll('#plPayPanel [data-ppon]')].map(el => el.dataset.ppon);
+      let n = 0;
+      for (const sid of ids) {
+        if (!$(`pp-${sid}-on`).checked) continue;
+        const date = $(`pp-${sid}-date`).value;
+        if (!date) { $('ppMsg').textContent = '振込日を入れてください。'; return; }
+        (((state.plPaid ||= {})[m] ||= {})[sid] = { date, amount: num($(`pp-${sid}-amt`).value) || 0, fee: num($(`pp-${sid}-fee`).value) || 0 });
+        n++;
+      }
+      if (!n) { $('ppMsg').textContent = '支払済みにする業者にチェックを付けてください。'; return; }
+      view.payDue = null; save(); updatePL();
+      $('plMsg').className = 'msg ok'; $('plMsg').textContent = `${n}社を支払済みにしました。`;
+      return;
+    }
+    if (t.id === 'plPrint') {
+      try {
+        openPrint(`仕入一覧_${monthName(view.month)}締め.html`, plDoc(view.month));
+        $('plMsg').className = 'msg ok'; $('plMsg').textContent = '新しいタブで開きました。印刷してください。';
+      } catch (err) { $('plMsg').className = 'msg'; $('plMsg').textContent = err?.code === 'declined' ? '保存をやめました。' : '保存できませんでした。'; }
+    }
+  });
+
+  function plDoc(m) {
+    const { t, due, n } = updatePL();
+    // 印刷用は列が多いので文字を少し小さくする
+    const rows = plSorted().map(sp => {
+      const o = plInv(m, sp.id), sum = plTotal(o);
+      return `<tr${sum ? '' : ' class="no"'}><td>${esc(sp.cat)}</td><td>${esc(sp.no)}</td><td class="nm">${esc(sp.name)}</td><td>${esc(sp.site)}</td><td>${esc(sp.bank)}</td><td>${esc(sp.branch)}</td><td>${esc(sp.type)}</td><td>${esc(sp.acct)}</td>
+        <td>${ymd(dueOf(m, sp.site))}</td><td class="n">${o.t10 ? yen(o.t10) : ''}</td><td class="n">${o.t8 ? yen(o.t8) : ''}</td><td class="n">${o.ot ? yen(o.ot) : ''}</td>
+        <td class="n b">${sum ? '¥' + yen(sum) : ''}</td><td class="n">${sum ? '¥' + yen(sp.fee || 0) : ''}</td><td class="n b">${sum ? yen(plPay(sp, o)) : '0'}</td><td>${plPaidOf(m, sp.id).date ? ymd(plPaidOf(m, sp.id).date) : ''}</td><td class="n">${plPaidOf(m, sp.id).date ? yen(plPaidOf(m, sp.id).amount || 0) : ''}</td><td class="n">${plPaidOf(m, sp.id).date ? yen(plPaidOf(m, sp.id).fee || 0) : ''}</td></tr>`;
+    }).join('');
+    const tt = new Date();
+    return `<!doctype html><html lang="ja"><head><meta charset="utf-8"><title>仕入一覧 ${monthName(m)}締め</title>
+<style>
+@page { size: A4 landscape; margin: 0; }
+* { box-sizing: border-box; }
+html, body { margin: 0; background: #e9e9e9; }
+body { font-family: "Hiragino Sans", "Yu Gothic", "Meiryo", sans-serif; color: #000; font-size: 7.8pt; }
+.bar { background: #eef3f0; padding: 8px 12px; font-size: 10pt; display: flex; gap: 12px; align-items: center; justify-content: center; }
+.bar button { font-size: 11pt; padding: 6px 14px; }
+.page { width: 297mm; min-height: 210mm; margin: 8mm auto; padding: 9mm 8mm; background: #fff; box-shadow: 0 1px 6px rgba(0,0,0,.2); display: grid; gap: 4mm; align-content: start; }
+@media print { html, body { background: #fff; } .bar { display: none; } .page { margin: 0; box-shadow: none; } }
+.head { display: flex; justify-content: space-between; align-items: baseline; }
+h1 { font-size: 16pt; margin: 0; letter-spacing: .2em; }
+h1 span { font-size: 13pt; letter-spacing: 0; margin-left: 6mm; padding: 1mm 4mm; background: #e6ecf5; }
+table { border-collapse: collapse; width: 100%; }
+th, td { border: 1px solid #555; padding: 1mm 1.5mm; white-space: nowrap; }
+th { background: #eee; font-weight: normal; }
+td.n { text-align: right; font-family: "Courier New", monospace; }
+td.b { font-weight: bold; }
+td.nm { white-space: normal; min-width: 30mm; }
+tr.no td { color: #888; }
+tfoot td { font-weight: bold; background: #f6f6f6; }
+.bottom { display: flex; gap: 8mm; justify-content: flex-end; }
+.bottom table { width: auto; font-size: 9.5pt; }
+</style></head><body>
+<div class="bar"><button onclick="window.print()">印刷する</button><span>A4横で印刷してください。</span></div>
+<div class="page">
+  <div class="head"><h1>請求書一覧<span>${monthName(m)}締め（締め日 ${ymd(monthEnd(m))}）</span></h1><div>${tt.getFullYear()}/${tt.getMonth() + 1}/${tt.getDate()}現在　${esc(state.srSet?.toName || '')}</div></div>
+  <table><thead><tr><th>分類</th><th>番号</th><th>業者名</th><th>支払サイト</th><th>銀行名</th><th>支店名</th><th>預金</th><th>口座番号</th><th>支払期日</th><th>10%対象</th><th>8%対象</th><th>その他</th><th>請求額</th><th>手数料<br>(予定)</th><th>振込予定額</th><th>振込日</th><th>振込額</th><th>振込<br>手数料</th></tr></thead>
+    <tbody>${rows}</tbody>
+    <tfoot><tr><td colspan="9">合計（請求書 ${n}社）</td><td class="n">${yen(t.t10)}</td><td class="n">${yen(t.t8)}</td><td class="n">${yen(t.ot)}</td><td class="n">¥${yen(t.sum)}</td><td class="n">¥${yen(t.fee)}</td><td class="n">${yen(t.pay)}</td><td></td><td class="n">${yen(t.paidAmt)}</td><td class="n">${yen(t.paidFee)}</td></tr></tfoot></table>
+  <div class="bottom">
+    <table><thead><tr><th colspan="2">支払期日ごとの合計額</th></tr></thead><tbody>${Object.keys(due).sort().map(dd => `<tr><td>${ymd(dd)}</td><td class="n">${yen(due[dd])}</td></tr>`).join('')}<tr><td><b>合計</b></td><td class="n b">${yen(t.pay)}</td></tr></tbody></table>
+  </div>
+</div>
+<script>window.addEventListener('load', () => setTimeout(() => window.print(), 300));<\/script>
+</body></html>`;
+  }
+
+  /* ---------- 年間一覧 ---------- */
+
+  function monthStatus(m) {
+    if (pendingReq(m)) return { cls: 'req', label: '修正依頼中' };
+    if (state.submitted[m]) return { cls: 'locked', label: reopened(m) ? '再提出済み' : '提出済み' };
+    if (m > thisYM) return { cls: 'none', label: '—' };
+    if (reopened(m)) return { cls: 'open', label: '修正中' };
+    return ORDER.some(k => state.rows[k].some(r => inMonth(r, m))) ? { cls: 'open', label: '入力中' } : { cls: 'none', label: '未入力' };
+  }
+  const fyStartOf = m => { const [y, mo] = m.split('-').map(Number); return ym(mo >= FY_START ? y : y - 1, FY_START); };
+
+  function renderYear() {
+    const start = fyStartOf(view.month);
+    const months = Array.from({ length: 12 }, (_, i) => shiftMonth(start, i));
+    const [sy] = start.split('-');
+    $('monthLabel').textContent = `${sy}年度`;
+    let h = `<div class="ledger-head"><h2>年間一覧　${monthName(months[0])}〜${monthName(months[11])}</h2><p>月を押すと、その月の帳簿が開きます。</p></div>
+      <div class="table-box"><table><thead><tr><th>月</th><th>状況</th><th class="num">件数</th><th class="num">現金 月末残高</th><th class="num">現金確認の差額</th><th class="num">売上精算の支払金額</th><th class="num">仕入の請求額</th></tr></thead><tbody>`;
+    for (const m of months) {
+      const st = monthStatus(m);
+      const future = m > thisYM;
+      const n = ORDER.reduce((s, k) => s + state.rows[k].filter(r => inMonth(r, m)).length, 0);
+      const c = state.counts[m];
+      const diff = c ? countTotal(c) - bookCashAt(c.date) : null;
+      h += `<tr class="clickable${m === thisYM ? ' current' : ''}" data-month="${m}" tabindex="0">
+        <td>${Number(m.slice(5))}月${m === thisYM ? '（今月）' : ''}</td><td><span class="pill ${st.cls}">${st.label}</span></td>
+        <td class="num">${future ? '' : n}</td>
+        <td class="num">${future ? '' : yen(openingFor('cash', shiftMonth(m, 1)))}</td>
+        <td class="num${diff ? ' diff-bad' : ''}">${diff === null ? (future ? '' : '—') : diffText(diff)}</td>
+        <td class="num">${state.sr?.[m] ? yen(srCalc(state.sr[m], state.srSet, m).pay) : ''}</td>
+        <td class="num">${future ? '' : yen(plInvoices(m).reduce((t, sp) => t + plTotal(plInv(m, sp.id)), 0)) }</td></tr>`;
+    }
+    $('yearView').innerHTML = h + '</tbody></table></div>';
+  }
+
+  function openMonth(m) { view.mode = 'month'; view.month = m; resetView(); render(); window.scrollTo({ top: 0 }); }
+  $('yearView').addEventListener('click', e => { const tr = e.target.closest('[data-month]'); if (tr) openMonth(tr.dataset.month); });
+  $('yearView').addEventListener('keydown', e => { const tr = e.target.closest('[data-month]'); if (tr && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); openMonth(tr.dataset.month); } });
+  $('yearBtn').addEventListener('click', () => { view.mode = view.mode === 'year' ? 'month' : 'year'; resetView(); render(); });
+
+  /* ---------- 全体 ---------- */
+
+  function render() {
+    const year = view.mode === 'year';
+    for (const id of ['tabs', 'ledger', 'submitBar']) $(id).hidden = year;
+    document.querySelector('.status').hidden = year;
+    $('yearView').hidden = !year;
+    $('yearBtn').textContent = year ? '月の帳簿に戻る' : '年間一覧';
+    $('prevMonth').setAttribute('aria-label', year ? '前の年度' : '前の月');
+    $('nextMonth').setAttribute('aria-label', year ? '次の年度' : '次の月');
+    if (year) { renderYear(); return; }
+    $('monthLabel').textContent = monthName(view.month);
+    const isCash = view.ledger === 'cash';
+    const isSR = view.ledger === 'sr', isPL = view.ledger === 'pl';
+    $('cashPanel').hidden = !isCash; $('entryForm').hidden = isCash || isSR || isPL;
+    $('srBox').hidden = !isSR; $('payBox').hidden = !isSR; $('plBox').hidden = !isPL; $('tableBox').hidden = isSR || isPL;
+    renderTabs(); renderStatus();
+    if (isPL) { renderPL(); renderSubmit(); return; }
+    if (isSR) { renderSR(); renderPay(); renderSubmit(); return; }
+    renderTable();
+    if (isCash) renderCashPanel(); else renderForm();
+    renderSubmit();
+  }
+
+  function msg(text, ok) { const el = $('formMsg'); el.textContent = text; el.className = 'msg' + (ok ? ' ok' : ''); }
+  function resetView() { view.editing = null; view.confirmDel = null; view.cashKind = null; view.draft = null; view.submitStep = null; view.countDraft = null; view.reqForm = false; view.srDraft = null; view.payEdit = null; view.payBank = null; view.plEdit = null; view.spDel = null; view.payDue = null; msg(''); }
+
+  $('tabs').addEventListener('click', e => {
+    const b = e.target.closest('button[data-k]'); if (!b) return;
+    const keepSubmit = view.submitStep; const keepCount = view.countDraft;
+    if (keepSubmit) updateCount();
+    view.ledger = b.dataset.k; resetView();
+    view.submitStep = keepSubmit; view.countDraft = keepSubmit ? view.countDraft || keepCount : null;
+    try { localStorage.setItem(KEY + ':tab', view.ledger); } catch (err) {}
+    render();
+  });
+  $('prevMonth').addEventListener('click', () => { view.month = shiftMonth(view.month, view.mode === 'year' ? -12 : -1); resetView(); render(); });
+  $('nextMonth').addEventListener('click', () => { view.month = shiftMonth(view.month, view.mode === 'year' ? 12 : 1); resetView(); render(); });
+
+  $('table').addEventListener('click', e => {
+    const pr = e.target.closest('[data-print]');
+    if (pr) { printExp(state.rows.cash.find(r => r.id === pr.dataset.print)); return; }
+    const ed = e.target.closest('[data-edit]'), del = e.target.closest('[data-del]');
+    if (ed) {
+      view.confirmDel = null; msg('');
+      if (view.ledger === 'cash') {
+        const row = state.rows.cash.find(r => r.id === ed.dataset.edit);
+        startCash(row.kind, row); render(); $('cashPanel').scrollIntoView({ block: 'nearest' });
+      } else { view.editing = ed.dataset.edit; render(); $('entryForm').scrollIntoView({ block: 'nearest' }); }
+    }
+    if (del) {
+      if (view.confirmDel === del.dataset.del) {
+        const gone = state.rows[view.ledger].find(r => r.id === del.dataset.del);
+        if (gone) logChange(view.month, '削除', view.ledger, gone);
+        state.rows[view.ledger] = state.rows[view.ledger].filter(r => r.id !== del.dataset.del);
+        if (view.ledger === 'cash') state.rows.bank = state.rows.bank.filter(b => b.from !== del.dataset.del);
+        if (view.editing === del.dataset.del) { view.editing = null; view.cashKind = null; view.draft = null; }
+        view.confirmDel = null; save(); msg('記入を消しました。', true);
+      } else view.confirmDel = del.dataset.del;
+      render();
+    }
+  });
+
+  $('cancelEdit').addEventListener('click', () => { view.editing = null; msg(''); render(); });
+
+  $('entryForm').addEventListener('submit', e => {
+    e.preventDefault();
+    if (locked()) return;
+    const L = LEDGERS[view.ledger];
+    const fd = new FormData(e.target);
+    const rec = {};
+    for (const f of L.fields) {
+      if (f.type === 'check') rec[f.k] = fd.get(f.k) === 'on';
+      else if (f.type === 'num') rec[f.k] = num(fd.get(f.k));
+      else rec[f.k] = String(fd.get(f.k) || '').trim();
+    }
+    if (!rec.date || !rec.date.startsWith(view.month)) return msg(`日付は${monthName(view.month)}の中から選んでください。`);
+    if (!rec.desc) return msg('内容を入力してください。');
+    if (L.balance) {
+      const hasIn = rec.in > 0, hasOut = rec.out > 0;
+      if (!hasIn && !hasOut) return msg('入金か出金のどちらかに金額を入力してください。');
+      if (hasIn && hasOut) return msg('入金と出金は別の行に分けて入力してください。');
+    } else if (!(rec.amount > 0)) return msg('金額を入力してください。');
+    for (const k of Object.keys(rec)) if (rec[k] === undefined || rec[k] === '' || rec[k] === false) delete rec[k];
+    if (view.editing) {
+      const i = state.rows[view.ledger].findIndex(r => r.id === view.editing);
+      if (i >= 0) state.rows[view.ledger][i] = { id: view.editing, ...rec };
+      logChange(view.month, '修正', view.ledger, rec);
+      view.editing = null; msg('直しました。', true);
+    } else {
+      state.rows[view.ledger].push({ id: id(), ...rec });
+      logChange(view.month, '追加', view.ledger, rec);
+      msg('追加しました。', true);
+    }
+    save(); render();
+  });
+
+  $('reloadBtn').addEventListener('click', () => location.reload());
+  render();
+  boot();
+})();
+</script>
+</body>
+</html>

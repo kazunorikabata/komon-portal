@@ -1,0 +1,32 @@
+name = "komon-portal"
+main = "src/worker.js"
+compatibility_date = "2025-09-01"
+workers_dev = false
+
+# 画面（HTML）もすべてWorkerを通して、ログインと権限を確認してから返す
+[assets]
+directory = "./public"
+binding = "ASSETS"
+run_worker_first = true
+
+# 顧問先は c-xxxx.kabaoffice.com、事務所は office.kabaoffice.com
+# （DNSに「*」のレコードをプロキシ有効で作っておく。www などの既存のレコードは影響を受けない）
+routes = [
+  { pattern = "*.kabaoffice.com/*", zone_name = "kabaoffice.com" },
+]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "komon-portal"
+database_id = "ここにD1のIDを入れる"
+migrations_dir = "migrations"
+
+[vars]
+# Cloudflare Zero Trust のチーム名（例：kabaoffice.cloudflareaccess.com）
+TEAM_DOMAIN = "ここにチームのドメインを入れる"
+# Access アプリケーションの AUD タグ（複数あるときはカンマ区切り）
+ACCESS_AUD = "ここにAUDタグを入れる"
+# 事務所のスタッフのメールアドレス（カンマ区切り）
+STAFF_EMAILS = "ここにスタッフのメールアドレスを入れる"
+# 事務所用画面のサブドメイン
+OFFICE_HOST = "office"
