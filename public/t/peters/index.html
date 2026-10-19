@@ -1509,6 +1509,12 @@ tr.sum td { font-weight: bold; border-top: 1.5px solid #000; border-bottom: 0; }
         <label class="f" for="sp-fee">振込手数料（先方負担分・円）<input type="number" id="sp-fee" min="0" step="1" value="${e?.fee ?? 0}"></label>
       </div>
       <div class="form-foot"><span class="msg" id="spMsg" role="status"></span><div style="display:flex;gap:8px">${e ? '<button type="button" class="btn ghost" id="spCancel">やめる</button>' : ''}<button type="button" class="btn" id="spSave">${e ? '直した内容で保存' : '追加する'}</button></div></div>
+      <div style="display:grid;gap:6px;border-top:1px solid var(--rule);padding-top:12px">
+        <h3 style="margin:0">CSVでまとめて登録する</h3>
+        <p style="margin:0;font-size:12px;color:var(--ink-soft)">1行目は見出しで、列は「業者分類, 業者番号, 業者名, 支払サイト, 銀行名, 支店名, 預金, 口座番号, 振込手数料」の順です。同じ業者名がすでにあれば、内容を上書きします。</p>
+        <label class="f" for="sp-csv">CSVファイル（UTF-8 または Shift-JIS）<input type="file" id="sp-csv" accept=".csv,text/csv"></label>
+        <span class="msg" id="spCsvMsg" role="status"></span>
+      </div>
     </details>`;
   }
 
@@ -1552,6 +1558,42 @@ tr.sum td { font-weight: bold; border-top: 1.5px solid #000; border-bottom: 0; }
     const t = e.target; if (!t.dataset.pl || !reopened(view.month, 'pl')) return;
     const sp = state.suppliers.find(x => x.id === t.dataset.pl);
     addLog(view.month, `修正：仕入一覧 ${sp.name} 請求額 ${yen(plTotal(plInv(view.month, sp.id)))}円`); save(); renderTabs();
+  });
+  // 業者をCSVでまとめて登録する
+  function csvRows(text) {
+    const rows = []; let row = [], cell = '', q = false;
+    for (let i = 0; i < text.length; i++) {
+      const c = text[i];
+      if (q) { if (c === '"') { if (text[i + 1] === '"') { cell += '"'; i++; } else q = false; } else cell += c; }
+      else if (c === '"') q = true;
+      else if (c === ',') { row.push(cell); cell = ''; }
+      else if (c === '\n' || c === '\r') { if (c === '\r' && text[i + 1] === '\n') i++; row.push(cell); rows.push(row); row = []; cell = ''; }
+      else cell += c;
+    }
+    if (cell || row.length) { row.push(cell); rows.push(row); }
+    return rows.filter(r => r.some(v => v.trim()));
+  }
+  $('plBox').addEventListener('change', async e => {
+    if (e.target.id !== 'sp-csv') return;
+    const f = e.target.files[0], m = $('spCsvMsg');
+    if (!f) return;
+    const buf = await f.arrayBuffer();
+    let text;
+    try { text = new TextDecoder('utf-8', { fatal: true }).decode(buf); } catch (err) { text = new TextDecoder('shift_jis').decode(buf); }
+    const rows = csvRows(text.replace(/^\uFEFF/, ''));
+    if (rows.length && /業者名/.test(rows[0].join(','))) rows.shift();
+    let added = 0, updated = 0, skipped = 0;
+    state.suppliers ||= [];
+    for (const r of rows) {
+      const [cat, no, name, site, bank, branch, type, acct, fee] = r.map(v => String(v ?? '').trim());
+      if (!name) { skipped++; continue; }
+      const rec = { cat, no, name, site: SITES.includes(site) ? site : '翌末', bank, branch, type: ACCT_TYPES.includes(type) ? type : '普通', acct: acct.replace(/^'/, ''), fee: num(fee) || 0 };
+      const cur = state.suppliers.find(x => x.name === name);
+      if (cur) { Object.assign(cur, rec); updated++; } else { state.suppliers.push({ id: id(), ...rec }); added++; }
+    }
+    save(); view.plMasterOpen = true; renderPL();
+    $('spCsvMsg').className = 'msg ok';
+    $('spCsvMsg').textContent = `${added}社を追加、${updated}社を上書きしました。${skipped ? `業者名のない${skipped}行は飛ばしました。` : ''}支払サイトが空欄や見慣れない書き方の業者は「翌末」にしています。`;
   });
   $('plBox').addEventListener('toggle', e => { if (e.target.classList?.contains('pl-master')) view.plMasterOpen = e.target.open; }, true);
   $('plBox').addEventListener('click', async e => {
