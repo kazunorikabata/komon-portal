@@ -150,6 +150,7 @@ html, body { margin: 0; }
     <div class="top-right">
       <label class="f" for="clientSel">顧問先<select id="clientSel"><option value="">読み込み中…</option></select></label>
       <div class="month-ctl" aria-label="表示する月"><button type="button" id="prevMonth" aria-label="前の月">‹</button><button type="button" id="nextMonth" aria-label="次の月">›</button></div>
+      <button type="button" class="btn ghost" id="refreshBtn" title="顧問先が送った最新のデータを読み込みます">最新にする</button>
       <span class="pill" id="submitted"></span>
     </div>
   </header>
@@ -300,6 +301,7 @@ html, body { margin: 0; }
     if (!current) return;
     clearTimeout(saveTimer); setSync('保存中…');
     saveTimer = setTimeout(async () => {
+      saveTimer = null;
       try {
         const r = await api(`/api/office/clients/${current.id}/doc/office`, { method: 'PUT', body: JSON.stringify({ data: state, version: officeVersion }) });
         officeVersion = r.version; setSync('保存しました');
@@ -632,8 +634,27 @@ html, body { margin: 0; }
       if (docs.office) { state = { ...defaultOffice(current.name), ...docs.office.data }; officeVersion = docs.office.version; }
     }
     try { localStorage.setItem('office-client', id || ''); } catch (e) {}
+    lastLoaded = Date.now();
     render();
   }
+
+  // 顧問先が送ったデータを読み込み直す（科目の設定などを保存中のときは待つ）
+  let lastLoaded = 0;
+  async function refresh() {
+    if (!current || saveTimer) return;
+    const r = await api(`/api/office/clients/${current.id}/state`);
+    docs = r.docs;
+    if (docs.office && docs.office.version !== officeVersion) { state = { ...defaultOffice(current.name), ...docs.office.data }; officeVersion = docs.office.version; }
+    await loadClients(); current = clients.find(c => c.id === current.id) || current;
+    lastLoaded = Date.now();
+    setSync(`${new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })} に最新の状態を読み込みました`);
+    render();
+  }
+  $('refreshBtn').addEventListener('click', () => refresh().catch(err => showReload(err.message)));
+  // 別のタブから戻ってきたときは、1分以上たっていれば自動で読み込み直す
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && Date.now() - lastLoaded > 60000) refresh().catch(() => {});
+  });
 
   $('clientSel').addEventListener('change', e => openClient(e.target.value).catch(err => showReload(err.message)));
   $('prevMonth').addEventListener('click', () => { setMonth(shiftYM(THIS, -1)); render(); });
