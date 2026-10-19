@@ -530,6 +530,8 @@ footer { font-size: 12px; color: var(--ink-soft); display: grid; gap: 4px; }
   }
   const md = s => { const [, mo, da] = s.split('-'); return `${Number(mo)}/${Number(da)}`; };
   const num = v => { v = String(v ?? '').trim(); return v === '' ? undefined : Math.max(0, Math.round(Number(v))) || undefined; };
+  // マイナスも受け付ける（入金の戻し・返金など）
+  const snum = v => { v = String(v ?? '').trim().replace(/[−ー－]/g, '-').replace(/,/g, ''); const n = Math.round(Number(v)); return v === '' || !isFinite(n) ? undefined : n || undefined; };
   const splitText = o => TAX.filter(([k]) => o[k]).map(([k, l]) => `${l.replace('対象', '').replace('（軽減）', '')} ${yen(o[k])}`).join('／');
 
   function openingFor(key, m) {
@@ -1321,25 +1323,26 @@ tr.sum td { font-weight: bold; border-top: 1.5px solid #000; border-bottom: 0; }
       const editing = view.payEdit === r.m;
       h += `<tr class="${editing ? 'editing' : ''}"><td>${monthName(r.m)}分</td><td class="date">${md2(r.due)}</td><td class="num">${yen(r.plan)}</td>
         <td class="date">${r.pays.map(p => `<div>${md2(p.date)}</div>`).join('')}</td>
-        <td class="num">${r.pays.map(p => `<div>${yen(p.amount)}</div>`).join('')}${r.pays.length > 1 ? `<div style="border-top:1px solid var(--rule)">${yen(r.got)}</div>` : ''}</td>
+        <td class="num">${r.pays.map(p => `<div${p.amount < 0 ? ' class="out"' : ''}>${yen(p.amount)}</div>`).join('')}${r.pays.length > 1 ? `<div style="border-top:1px solid var(--rule)">${yen(r.got)}</div>` : ''}</td>
         <td class="num ${r.left ? 'out' : ''}">${r.pays.length ? (r.closed && r.diff < 0 ? `差額 ${yen(-r.diff)}` : yen(r.left)) : ''}</td>
         <td><span class="pill ${r.st.cls}">${r.st.label}</span>${r.pays.filter(p => p.memo).map(p => `<div style="font-size:12px;color:var(--ink-soft)">${esc(p.memo)}</div>`).join('')}</td>
         <td><div class="row-actions">${editing ? '' : `<button type="button" class="link-btn" data-payedit="${r.m}">${r.pays.length ? (r.left ? '残りの入金を記録' : '入金の記録を見る') : '入金を記録'}</button>`}</div></td></tr>`;
       if (editing) {
         h += `<tr class="editing"><td colspan="8"><div class="pay-edit">
           ${r.pays.length ? `<div class="table-box"><table style="min-width:0"><thead><tr><th>入金日</th><th class="num">入金額</th><th>メモ</th><th></th></tr></thead><tbody>
-            ${r.pays.map(p => `<tr><td class="date">${md2(p.date)}</td><td class="num">${yen(p.amount)}</td><td>${esc(p.memo || '')}${p.close ? '<span class="tag">これで終わり</span>' : ''}</td>
+            ${r.pays.map(p => `<tr><td class="date">${md2(p.date)}</td><td class="num${p.amount < 0 ? ' out' : ''}">${yen(p.amount)}</td><td>${esc(p.memo || '')}${p.close ? '<span class="tag">これで終わり</span>' : ''}</td>
               <td><button type="button" class="link-btn danger" data-paydel="${p.id}">${view.payDel === p.id ? '本当に消す' : '消す'}</button></td></tr>`).join('')}
             <tr class="total"><td>合計</td><td class="num">${yen(r.got)}</td><td colspan="2">予定額との差 ${r.got - r.plan === 0 ? '0' : (r.got > r.plan ? '+' : '−') + yen(Math.abs(r.got - r.plan))}</td></tr></tbody></table></div>` : ''}
-          ${r.left > 0 ? `<h3 style="margin:0;font-size:14px">${r.pays.length ? '残りの入金を追加する' : '入金を記録する'}</h3>
+          <h3 style="margin:0;font-size:14px">${!r.pays.length ? '入金を記録する' : r.left > 0 ? '残りの入金を追加する' : '入金を追加する'}</h3>
           <div class="fields">
             <label class="f" for="pay-date">入金日<input type="date" id="pay-date" value=""></label>
-            <label class="f" for="pay-amount">入金額（円）<input type="number" id="pay-amount" min="0" step="1" inputmode="numeric" value="${r.left}"></label>
-            <label class="f wide" for="pay-memo">メモ（任意）<input type="text" id="pay-memo" value="" placeholder="例：振込手数料 440円 差し引き"></label>
+            <label class="f" for="pay-amount">入金額（円）<input type="number" id="pay-amount" step="1" inputmode="numeric" value="${r.left > 0 ? r.left : ''}"></label>
+            <label class="f wide" for="pay-memo">メモ（任意）<input type="text" id="pay-memo" value="" placeholder="例：振込手数料 440円 差し引き／カントリーへ返金"></label>
           </div>
-          <label class="check" for="pay-close"><input type="checkbox" id="pay-close">これで入金は終わり（残りは振込手数料などの差額として扱う）</label>` : ''}
+          <p style="margin:0;font-size:12px;color:var(--ink-soft)">返金や入金の戻しは、マイナス（例：-50000）で入力してください。</p>
+          ${r.left > 0 ? '<label class="check" for="pay-close"><input type="checkbox" id="pay-close">これで入金は終わり（残りは振込手数料などの差額として扱う）</label>' : ''}
           <div class="form-foot"><span class="msg" id="payMsg" role="status"></span>
-            <div style="display:flex;gap:8px;flex-wrap:wrap"><button type="button" class="btn ghost" id="payCancel">閉じる</button>${r.left > 0 ? '<button type="button" class="btn" id="paySave">入金を追加する</button>' : ''}</div></div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap"><button type="button" class="btn ghost" id="payCancel">閉じる</button><button type="button" class="btn" id="paySave">入金を追加する</button></div></div>
         </div></td></tr>`;
       }
     }
@@ -1357,10 +1360,10 @@ tr.sum td { font-weight: bold; border-top: 1.5px solid #000; border-bottom: 0; }
       view.payDel = null; save(); render(); return;
     }
     if (t.id === 'paySave') {
-      const date = $('pay-date').value, amount = num($('pay-amount').value), memo = $('pay-memo').value.trim(), close = $('pay-close').checked;
+      const date = $('pay-date').value, amount = snum($('pay-amount').value), memo = $('pay-memo').value.trim(), close = !!$('pay-close')?.checked;
       const msgEl = $('payMsg');
       if (!date) { msgEl.textContent = '入金日を入力してください。'; return; }
-      if (!amount) { msgEl.textContent = '入金額を入力してください。'; return; }
+      if (!amount) { msgEl.textContent = '入金額を入力してください（返金などはマイナスで入力します）。'; return; }
       (state.srPaid ||= {})[m0] = [...paysOf(m0), { id: id(), date, amount, ...(memo && { memo }), ...(close && { close: true }) }];
       const r = payRows().find(x => x.m === m0);
       if (!r || r.left === 0) view.payEdit = null;

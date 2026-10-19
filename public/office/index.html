@@ -457,7 +457,9 @@ html, body { margin: 0; }
         for (const p of srPays(m).slice().sort((a, b) => a.date < b.date ? -1 : 1)) {
           sum += Number(p.amount) || 0;
           if (!p.date.startsWith(THIS)) continue;
-          out.push({ key: `srpay:${m}:${p.id}`, date: p.date, dr: BANK, cr: URIKAKE, amt: p.amount, tax: '0', desc: '売上精算:入金', tekiyo: `${Number(mo)}月分売上精算 入金`, src: '入金確認' });
+          // マイナスの入金（返金・戻し）は、借方と貸方を入れ替えて金額をプラスにする
+          if (p.amount < 0) out.push({ key: `srpay:${m}:${p.id}`, date: p.date, dr: URIKAKE, cr: BANK, amt: -p.amount, tax: '0', desc: '売上精算:返金', tekiyo: `${Number(mo)}月分売上精算 返金${p.memo ? '・' + p.memo : ''}`, src: '入金確認（マイナス）' });
+          else out.push({ key: `srpay:${m}:${p.id}`, date: p.date, dr: BANK, cr: URIKAKE, amt: p.amount, tax: '0', desc: '売上精算:入金', tekiyo: `${Number(mo)}月分売上精算 入金`, src: '入金確認' });
           // 「これで終わり」にした入金で、予定額に足りない分は差額（振込手数料など）にする
           if (p.close && plan > sum) out.push({ key: `srdiff:${m}`, date: p.date, need: 'dr', cr: URIKAKE, amt: plan - sum, tax: 'p10', desc: '売上精算:入金差額', tekiyo: `${Number(mo)}月分売上精算 入金差額`, src: '予定額との差（振込手数料など）' });
         }
