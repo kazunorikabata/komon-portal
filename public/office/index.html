@@ -284,13 +284,14 @@ html, body { margin: 0; }
     '0':  { label: '対象外', ku: '0', kuName: '対象外', zei: '', zeiName: '' },
     p10: { label: '課税仕入 10%', ku: '31', kuName: '仕入対課税売上', zei: '10', zeiName: '税率１０％' },
     p8:  { label: '課税仕入 8%（軽減）', ku: '31', kuName: '仕入対課税売上', zei: '9', zeiName: '軽減税率８％' },
+    p10n: { label: '課税仕入 10%（インボイスなし・80%控除）', ku: '31', kuName: '仕入対課税売上', zei: '71', zeiName: '10%免80' },
     p8n: { label: '課税仕入 8%（インボイスなし・80%控除）', ku: '31', kuName: '仕入対課税売上', zei: '70', zeiName: '軽減 8%免80' },
     n34: { label: '非課税仕入', ku: '34', kuName: '非課税仕入', zei: '', zeiName: '' },
     s10: { label: '課税売上 10%', sales: true, zei: '10', zeiName: '税率１０％' },
     s8:  { label: '課税売上 8%（軽減）', sales: true, zei: '9', zeiName: '軽減税率８％' },
   };
   // JDLの課区・税区 → 上の税区分（過去の仕訳から覚えるときに使う）
-  const TAX_FROM_JDL = { '31/10': 'p10', '31/9': 'p8', '31/70': 'p8n', '34/': 'n34', '/': '0', '0/': '0', '11/10': 's10', '11/9': 's8' };
+  const TAX_FROM_JDL = { '31/10': 'p10', '31/9': 'p8', '31/70': 'p8n', '31/71': 'p10n', '34/': 'n34', '/': '0', '0/': '0', '11/10': 's10', '11/9': 's8' };
   const CASH = '111', BANK = '130', FUKUGO = '997', URIKAKE = '162', KAIKAKE = '312';
   const BOOKS = { cash: '現金出納帳', sr: '売上精算書', pl: '仕入一覧' };
 
@@ -422,7 +423,7 @@ html, body { margin: 0; }
     const split = (base, o, side, fixed, desc, src) => {
       const noInv = side === 'dr' && !!o.noinv;
       const ks = ['t10', 't8', 'ot'].filter(k => o[k]);
-      for (const k of ks) out.push({ ...base, key: `${base.key}:${k}`, amt: o[k], tax: noInv && k === 't8' ? 'p8n' : BUCKET_TAX[k], bucket: k, need: side,
+      for (const k of ks) out.push({ ...base, key: `${base.key}:${k}`, amt: o[k], tax: noInv && k === 't8' ? 'p8n' : noInv && k === 't10' ? 'p10n' : BUCKET_TAX[k], bucket: k, need: side,
         [side === 'dr' ? 'cr' : 'dr']: fixed, desc, tekiyo: ks.length > 1 ? `${desc}・${BUCKET_NAME[k]}` : desc, src, noInv: noInv && k !== 'ot' });
     };
     if (which === 'cash') {
