@@ -1274,57 +1274,67 @@ tr.sum td { font-weight: bold; border-top: 1.5px solid #000; border-bottom: 0; }
 
   /* ---------- 入金確認（売上精算書の支払金額） ---------- */
 
+  // 入金は1つの精算書に何回かに分けて記録できる。以前の1件だけの記録も読めるようにする
+  function paysOf(m) {
+    const v = (state.srPaid || {})[m];
+    if (!v) return [];
+    return Array.isArray(v) ? v : [{ id: 'p0', ...v }];
+  }
+
   function payRows() {
     if (!state.sr) return [];
     return Object.keys(state.sr).sort().reverse().map(m => {
       const x = state.sr[m];
       const due = x.payDate || monthEnd(shiftMonth(m, 1));
       const plan = srCalc(x, state.srSet, m).pay;
-      const p = (state.srPaid || {})[m];
-      const got = p ? fnum(p.amount) : 0;
+      const pays = paysOf(m).slice().sort((a, b) => a.date < b.date ? -1 : 1);
+      const got = pays.reduce((t, p) => t + fnum(p.amount), 0);
+      const closed = pays.some(p => p.close);
+      const left = Math.max(0, plan - got);
       let st;
-      if (p && got >= plan) st = { cls: 'locked', label: '入金済み' };
-      else if (p && got > 0) st = { cls: 'part', label: '一部入金' };
+      if (got >= plan) st = { cls: 'locked', label: '入金済み' };
+      else if (closed) st = { cls: 'locked', label: '入金済み（差額あり）' };
+      else if (got > 0) st = { cls: today > due ? 'late' : 'part', label: `一部入金（残り ${yen(left)}円）` };
       else if (today > due) st = { cls: 'late', label: '期限を過ぎています' };
       else st = { cls: 'open', label: '入金待ち' };
-      return { m, due, plan, p, got, diff: p ? got - plan : null, st };
+      return { m, due, plan, pays, got, left: closed ? 0 : left, diff: pays.length ? got - plan : null, closed, st };
     });
-  }
-
-  // 預金出納帳から、同じ金額の入金を探す
-  function payCandidate(r) {
-    return state.rows.bank.find(b => b.in === r.plan && b.date >= `${r.m}-01` && !Object.values(state.srPaid || {}).some(p => p.bankId === b.id));
   }
 
   function renderPay() {
     const rows = payRows();
-    const waiting = rows.filter(r => !r.p || r.got < r.plan);
+    const waiting = rows.filter(r => r.left > 0);
     const late = rows.filter(r => r.st.cls === 'late');
     const md2 = s2 => { const [y2, a, b2] = s2.split('-'); return `${y2}/${Number(a)}/${Number(b2)}`; };
-    let h = `<div class="ledger-head" style="margin-top:12px"><h2>入金確認</h2><p>売上精算書の支払金額が、予定日までに入金されたかを確認します。</p></div>
+    let h = `<div class="ledger-head" style="margin-top:12px"><h2>入金確認</h2><p>売上精算書の支払金額が、予定日までに入金されたかを確認します。分けて入金されたときは、入金のたびに追加してください。</p></div>
       <div class="chips">
-      <span class="chip">入金待ち <b>${waiting.length}</b> 件・<b>${yen(waiting.reduce((t, r) => t + r.plan - r.got, 0))}</b> 円</span>
+      <span class="chip">入金待ち <b>${waiting.length}</b> 件・<b>${yen(waiting.reduce((t, r) => t + r.left, 0))}</b> 円</span>
       ${late.length ? `<span class="chip" style="color:var(--out);border-color:var(--out)">期限を過ぎた入金 <b style="color:var(--out)">${late.length}</b> 件</span>` : ''}</div>
-      <div class="table-box"><table><thead><tr><th>精算書の月</th><th>支払予定日</th><th class="num">予定額</th><th>入金日</th><th class="num">入金額</th><th class="num">差額</th><th>状況</th><th></th></tr></thead><tbody>`;
-    if (!rows.length) h += `<tr><td colspan="8" class="empty">まだ売上精算書がありません。「売上精算書」タブで保存すると、ここに出ます。</td></tr>`;
+      <div class="table-box"><table><thead><tr><th>精算書の月</th><th>支払予定日</th><th class="num">予定額</th><th>入金日</th><th class="num">入金額</th><th class="num">残り</th><th>状況</th><th></th></tr></thead><tbody>`;
+    if (!rows.length) h += `<tr><td colspan="8" class="empty">まだ売上精算書がありません。上で保存すると、ここに出ます。</td></tr>`;
     for (const r of rows) {
       const editing = view.payEdit === r.m;
       h += `<tr class="${editing ? 'editing' : ''}"><td>${monthName(r.m)}分</td><td class="date">${md2(r.due)}</td><td class="num">${yen(r.plan)}</td>
-        <td class="date">${r.p?.date ? md2(r.p.date) : ''}</td><td class="num">${r.p ? yen(r.got) : ''}</td>
-        <td class="num ${r.diff ? 'out' : ''}">${r.diff === null ? '' : r.diff === 0 ? '0' : (r.diff > 0 ? '+' : '−') + yen(Math.abs(r.diff))}</td>
-        <td><span class="pill ${r.st.cls}">${r.st.label}</span>${r.p?.memo ? `<div style="font-size:12px;color:var(--ink-soft)">${esc(r.p.memo)}</div>` : ''}</td>
-        <td><div class="row-actions">${editing ? '' : `<button type="button" class="link-btn" data-payedit="${r.m}">${r.p ? '直す' : '入金を記録'}</button>`}</div></td></tr>`;
+        <td class="date">${r.pays.map(p => `<div>${md2(p.date)}</div>`).join('')}</td>
+        <td class="num">${r.pays.map(p => `<div>${yen(p.amount)}</div>`).join('')}${r.pays.length > 1 ? `<div style="border-top:1px solid var(--rule)">${yen(r.got)}</div>` : ''}</td>
+        <td class="num ${r.left ? 'out' : ''}">${r.pays.length ? (r.closed && r.diff < 0 ? `差額 ${yen(-r.diff)}` : yen(r.left)) : ''}</td>
+        <td><span class="pill ${r.st.cls}">${r.st.label}</span>${r.pays.filter(p => p.memo).map(p => `<div style="font-size:12px;color:var(--ink-soft)">${esc(p.memo)}</div>`).join('')}</td>
+        <td><div class="row-actions">${editing ? '' : `<button type="button" class="link-btn" data-payedit="${r.m}">${r.pays.length ? (r.left ? '残りの入金を記録' : '入金の記録を見る') : '入金を記録'}</button>`}</div></td></tr>`;
       if (editing) {
-        const c = null;
         h += `<tr class="editing"><td colspan="8"><div class="pay-edit">
-          ${c ? `<div class="cand"><span>預金出納帳に ${md2(c.date)}「${esc(c.desc)}${c.partner ? '・' + esc(c.partner) : ''}」${yen(c.in)}円 の入金があります。</span><button type="button" class="btn ghost" data-usecand="${c.id}">この入金を使う</button></div>` : ''}
+          ${r.pays.length ? `<div class="table-box"><table style="min-width:0"><thead><tr><th>入金日</th><th class="num">入金額</th><th>メモ</th><th></th></tr></thead><tbody>
+            ${r.pays.map(p => `<tr><td class="date">${md2(p.date)}</td><td class="num">${yen(p.amount)}</td><td>${esc(p.memo || '')}${p.close ? '<span class="tag">これで終わり</span>' : ''}</td>
+              <td><button type="button" class="link-btn danger" data-paydel="${p.id}">${view.payDel === p.id ? '本当に消す' : '消す'}</button></td></tr>`).join('')}
+            <tr class="total"><td>合計</td><td class="num">${yen(r.got)}</td><td colspan="2">予定額との差 ${r.got - r.plan === 0 ? '0' : (r.got > r.plan ? '+' : '−') + yen(Math.abs(r.got - r.plan))}</td></tr></tbody></table></div>` : ''}
+          ${r.left > 0 ? `<h3 style="margin:0;font-size:14px">${r.pays.length ? '残りの入金を追加する' : '入金を記録する'}</h3>
           <div class="fields">
-            <label class="f" for="pay-date">入金日<input type="date" id="pay-date" value="${r.p?.date || ''}"></label>
-            <label class="f" for="pay-amount">入金額（円）<input type="number" id="pay-amount" min="0" step="1" inputmode="numeric" value="${r.p ? r.got : r.plan}"></label>
-            <label class="f wide" for="pay-memo">メモ（任意）<input type="text" id="pay-memo" value="${esc(r.p?.memo || '')}" placeholder="例：振込手数料 440円 差し引き"></label>
+            <label class="f" for="pay-date">入金日<input type="date" id="pay-date" value=""></label>
+            <label class="f" for="pay-amount">入金額（円）<input type="number" id="pay-amount" min="0" step="1" inputmode="numeric" value="${r.left}"></label>
+            <label class="f wide" for="pay-memo">メモ（任意）<input type="text" id="pay-memo" value="" placeholder="例：振込手数料 440円 差し引き"></label>
           </div>
+          <label class="check" for="pay-close"><input type="checkbox" id="pay-close">これで入金は終わり（残りは振込手数料などの差額として扱う）</label>` : ''}
           <div class="form-foot"><span class="msg" id="payMsg" role="status"></span>
-            <div style="display:flex;gap:8px;flex-wrap:wrap">${r.p ? '<button type="button" class="btn ghost" id="payClear">記録を消す</button>' : ''}<button type="button" class="btn ghost" id="payCancel">やめる</button><button type="button" class="btn" id="paySave">保存する</button></div></div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap"><button type="button" class="btn ghost" id="payCancel">閉じる</button>${r.left > 0 ? '<button type="button" class="btn" id="paySave">入金を追加する</button>' : ''}</div></div>
         </div></td></tr>`;
       }
     }
@@ -1332,21 +1342,24 @@ tr.sum td { font-weight: bold; border-top: 1.5px solid #000; border-bottom: 0; }
   }
 
   $('payBox').addEventListener('click', e => {
-    const t = e.target;
-    if (t.dataset.payedit) { view.payEdit = t.dataset.payedit; renderPay(); $('pay-date').focus(); return; }
-    if (t.id === 'payCancel') { view.payEdit = null; renderPay(); return; }
-    if (t.dataset.usecand) {
-      const b = state.rows.bank.find(x => x.id === t.dataset.usecand);
-      $('pay-date').value = b.date; $('pay-amount').value = b.in; view.payBank = b.id; return;
+    const t = e.target, m0 = view.payEdit;
+    if (t.dataset.payedit) { view.payEdit = t.dataset.payedit; view.payDel = null; renderPay(); $('pay-date')?.focus(); return; }
+    if (t.id === 'payCancel') { view.payEdit = null; view.payDel = null; renderPay(); return; }
+    if (t.dataset.paydel) {
+      if (view.payDel !== t.dataset.paydel) { view.payDel = t.dataset.paydel; renderPay(); return; }
+      const list = paysOf(m0).filter(p => p.id !== t.dataset.paydel);
+      if (list.length) state.srPaid[m0] = list; else delete state.srPaid[m0];
+      view.payDel = null; save(); render(); return;
     }
-    if (t.id === 'payClear') { delete state.srPaid[view.payEdit]; view.payEdit = null; save(); render(); return; }
     if (t.id === 'paySave') {
-      const date = $('pay-date').value, amount = num($('pay-amount').value), memo = $('pay-memo').value.trim();
-      const m = $('payMsg');
-      if (!date) { m.textContent = '入金日を入力してください。'; return; }
-      if (!amount) { m.textContent = '入金額を入力してください。'; return; }
-      (state.srPaid ||= {})[view.payEdit] = { date, amount, ...(memo && { memo }), ...(view.payBank && { bankId: view.payBank }) };
-      view.payEdit = null; view.payBank = null; save(); render();
+      const date = $('pay-date').value, amount = num($('pay-amount').value), memo = $('pay-memo').value.trim(), close = $('pay-close').checked;
+      const msgEl = $('payMsg');
+      if (!date) { msgEl.textContent = '入金日を入力してください。'; return; }
+      if (!amount) { msgEl.textContent = '入金額を入力してください。'; return; }
+      (state.srPaid ||= {})[m0] = [...paysOf(m0), { id: id(), date, amount, ...(memo && { memo }), ...(close && { close: true }) }];
+      const r = payRows().find(x => x.m === m0);
+      if (!r || r.left === 0) view.payEdit = null;
+      save(); render();
     }
   });
 
@@ -1697,7 +1710,7 @@ tfoot td { font-weight: bold; background: #f6f6f6; }
   }
 
   function msg(text, ok) { const el = $('formMsg'); el.textContent = text; el.className = 'msg' + (ok ? ' ok' : ''); }
-  function resetView() { view.editing = null; view.confirmDel = null; view.cashKind = null; view.draft = null; view.submitStep = null; view.countDraft = null; view.reqForm = false; view.srDraft = null; view.payEdit = null; view.payBank = null; view.plEdit = null; view.spDel = null; view.payDue = null; msg(''); }
+  function resetView() { view.editing = null; view.confirmDel = null; view.cashKind = null; view.draft = null; view.submitStep = null; view.countDraft = null; view.reqForm = false; view.srDraft = null; view.payEdit = null; view.payDel = null; view.plEdit = null; view.spDel = null; view.payDue = null; msg(''); }
 
   $('tabs').addEventListener('click', e => {
     const b = e.target.closest('button[data-k]'); if (!b) return;

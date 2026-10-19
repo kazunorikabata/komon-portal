@@ -386,12 +386,16 @@ html, body { margin: 0; }
     return { A: keep(A), B: keep(B), pay };
   }
 
+  // 売上精算書の入金（何回かに分かれることがある）。以前の1件だけの記録は、それで入金が終わったものとして扱う
+  const srPays = m => { const v = CLIENT.srPaid[m]; return !v ? [] : Array.isArray(v) ? v : [{ id: 'p0', ...v, close: true }]; };
+
   // 月末残高（このしくみで記録した分）
   function balances() {
     const cash = CLIENT.cashOpening + CLIENT.cash.reduce((t, r) => t + (r.in || 0) - (r.out || 0), 0);
     const ar = Object.keys(CLIENT.sr).filter(m => m <= THIS).map(m => {
-      const p = CLIENT.srPaid[m];
-      return { m, left: p && p.date <= END ? 0 : srItems(CLIENT.sr[m], CLIENT.srSet).pay };
+      const ps = srPays(m).filter(p => p.date <= END);
+      if (ps.some(p => p.close)) return { m, left: 0 };
+      return { m, left: Math.max(0, srItems(CLIENT.sr[m], CLIENT.srSet).pay - ps.reduce((t, p) => t + (Number(p.amount) || 0), 0)) };
     }).filter(r => r.left);
     const ap = [];
     for (const [m, inv] of Object.entries(CLIENT.inv)) if (m <= THIS) for (const [sid, o] of Object.entries(inv)) {
@@ -444,11 +448,17 @@ html, body { margin: 0; }
         for (const a of it.A) out.push({ key: `sr:${a.k}`, date: END, dr: URIKAKE, need: 'cr', amt: a.amt, tax: a.tax, def: a.def, desc: `売上精算:${a.k}`, tekiyo: who || `${M}月分${a.name}`, src: `${a.name}：${a.src}` });
         for (const b of it.B) out.push({ key: `sr:${b.k}`, date: END, need: 'dr', cr: URIKAKE, amt: b.amt, tax: b.tax, def: b.def, desc: `売上精算:${b.k}`, tekiyo: who || `${M}月分${b.name}`, src: `${b.name}：${b.src}` });
       }
-      if (state.settings.withPay) for (const [m, p] of Object.entries(CLIENT.srPaid)) {
-        if (!p.date.startsWith(THIS)) continue;
+      if (state.settings.withPay) for (const m of Object.keys(CLIENT.srPaid)) {
+        if (!CLIENT.sr[m]) continue;
         const plan = srItems(CLIENT.sr[m], CLIENT.srSet).pay, [, mo] = m.split('-');
-        out.push({ key: `srpay:${m}`, date: p.date, dr: BANK, cr: URIKAKE, amt: p.amount, tax: '0', desc: '売上精算:入金', tekiyo: `${Number(mo)}月分売上精算 入金`, src: '入金確認' });
-        if (plan > p.amount) out.push({ key: `srdiff:${m}`, date: p.date, need: 'dr', cr: URIKAKE, amt: plan - p.amount, tax: 'p10', desc: '売上精算:入金差額', tekiyo: `${Number(mo)}月分売上精算 入金差額`, src: '予定額との差（振込手数料など）' });
+        let sum = 0;
+        for (const p of srPays(m).slice().sort((a, b) => a.date < b.date ? -1 : 1)) {
+          sum += Number(p.amount) || 0;
+          if (!p.date.startsWith(THIS)) continue;
+          out.push({ key: `srpay:${m}:${p.id}`, date: p.date, dr: BANK, cr: URIKAKE, amt: p.amount, tax: '0', desc: '売上精算:入金', tekiyo: `${Number(mo)}月分売上精算 入金`, src: '入金確認' });
+          // 「これで終わり」にした入金で、予定額に足りない分は差額（振込手数料など）にする
+          if (p.close && plan > sum) out.push({ key: `srdiff:${m}`, date: p.date, need: 'dr', cr: URIKAKE, amt: plan - sum, tax: 'p10', desc: '売上精算:入金差額', tekiyo: `${Number(mo)}月分売上精算 入金差額`, src: '予定額との差（振込手数料など）' });
+        }
       }
     } else {
       // 仕入一覧：仕入／買掛金（月末の日付）。支払は 買掛金／普通預金
