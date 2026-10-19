@@ -3,17 +3,17 @@ main = "src/worker.js"
 compatibility_date = "2025-09-01"
 workers_dev = false
 
-# 画面（HTML）もすべてWorkerを通して、ログインと権限を確認してから返す
-[assets]
-directory = "./public"
-binding = "ASSETS"
-run_worker_first = true
-
 # 顧問先は c-xxxx.kabaoffice.com、事務所は office.kabaoffice.com
 # （DNSに「*」のレコードをプロキシ有効で作っておく。www などの既存のレコードは影響を受けない）
 routes = [
   { pattern = "*.kabaoffice.com/*", zone_name = "kabaoffice.com" },
 ]
+
+# 画面（HTML）もすべてWorkerを通して、ログインと権限を確認してから返す
+[assets]
+directory = "./public"
+binding = "ASSETS"
+run_worker_first = true
 
 [[d1_databases]]
 binding = "DB"
@@ -23,10 +23,10 @@ migrations_dir = "migrations"
 
 [vars]
 # Cloudflare Zero Trust のチーム名（例：kabaoffice.cloudflareaccess.com）
-TEAM_DOMAIN = "ここにチームのドメインを入れる"
+TEAM_DOMAIN = "kabaoffice.cloudflareaccess.com"
 # Access アプリケーションの AUD タグ（複数あるときはカンマ区切り）
-ACCESS_AUD = "ここにAUDタグを入れる"
+ACCESS_AUD = "7d085be12867a820a38aad700821926c2b06c54038a1362cf6457a4ed678ef02"
 # 事務所のスタッフのメールアドレス（カンマ区切り）
-STAFF_EMAILS = "ここにスタッフのメールアドレスを入れる"
+STAFF_EMAILS = "kazunorikabata@kabatax.com,kaba@kabatax.com"
 # 事務所用画面のサブドメイン
 OFFICE_HOST = "office"
