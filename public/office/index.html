@@ -256,15 +256,27 @@ html, body { margin: 0; }
   let clients = [], current = null, docs = {}, CLIENT = null, templates = {};
   // 仕訳変換ができる画面の種類（ほかの種類は、その顧問先用の変換を作ってから足す）
   const JOURNAL_TEMPLATES = ['peters'];
+  const DENOMS = [10000, 5000, 2000, 1000, 500, 100, 50, 10, 5, 1];
+  const countTotal = c => DENOMS.reduce((s, v) => s + v * (Number(c?.['d' + v]) || 0), 0);
   function buildClient() {
     const months = Object.keys(docs).filter(k => k.startsWith('m:')).map(k => k.slice(2)).sort();
     const md = m => docs['m:' + m]?.data || {};
     const master = docs.master?.data || {};
     const all = months.flatMap(m => md(m).rows || []);
+    // 現金は、直前の現金残高確認で数えた額を起点にする（顧問先のページと同じ計算）
+    const counts = months.map(m => md(m).count).filter(c => c?.date).sort((a, b) => a.date < b.date ? -1 : 1);
+    const cashBal = (upTo, incl) => {
+      const c = counts.filter(c => c.date < upTo).pop();
+      let bal = c ? countTotal(c) : master.opening?.cash || 0;
+      for (const r of all) if (r.date && (!c || r.date > c.date) && (incl ? r.date <= upTo : r.date < upTo)) bal += (r.in || 0) - (r.out || 0);
+      return bal;
+    };
+    const count = md(THIS).count?.date ? md(THIS).count : null;
     const pick = k => Object.fromEntries(months.filter(m => md(m)[k] !== undefined).map(m => [m, md(m)[k]]));
     CLIENT = {
       cash: (md(THIS).rows || []),
-      cashOpening: (master.opening?.cash || 0) + all.filter(r => r.date < `${THIS}-01`).reduce((t, r) => t + (r.in || 0) - (r.out || 0), 0),
+      cashOpening: cashBal(`${THIS}-01`, false),
+      count, countDiff: count ? countTotal(count) - cashBal(count.date, true) : 0,
       srSet: master.srSet || {}, suppliers: master.suppliers || [],
       sr: pick('sr'), srPaid: pick('srPaid'), inv: pick('inv'), plPaid: pick('plPaid'), wage: pick('wage'), month: md(THIS),
     };
@@ -395,7 +407,7 @@ html, body { margin: 0; }
 
   // 月末残高（このしくみで記録した分）
   function balances() {
-    const cash = CLIENT.cashOpening + CLIENT.cash.reduce((t, r) => t + (r.in || 0) - (r.out || 0), 0);
+    const cash = CLIENT.cashOpening + CLIENT.cash.reduce((t, r) => t + (r.in || 0) - (r.out || 0), 0) + CLIENT.countDiff;
     const ar = Object.keys(CLIENT.sr).filter(m => m <= THIS).map(m => {
       const ps = srPays(m).filter(p => p.date <= END);
       if (ps.some(p => p.close)) return { m, left: 0 };
@@ -441,6 +453,10 @@ html, body { margin: 0; }
           l.desc, `経費精算（報告 ${r.reporter}／精算 ${r.settler}）${l.partner ? '・' + l.partner : ''}`));
         else split({ key: r.id, date: r.date }, r, r.dir === 'in' ? 'cr' : 'dr', CASH, r.desc, `その他${r.partner ? '・' + r.partner : ''}${r.memo ? '・' + r.memo : ''}`);
       }
+      // 現金残高確認の差額：これまでのJDLの仕訳と同じく、多いときは 現金／雑収入、足りないときは 雑費／現金
+      const c = CLIENT.count, d = CLIENT.countDiff, why = `現金残高確認の差額${c?.memo ? '・' + c.memo : ''}`;
+      if (d > 0) out.push({ key: 'cashdiff', date: c.date, dr: CASH, need: 'cr', def: '819', amt: d, tax: '0', desc: '現金過不足:過剰', tekiyo: '現金過不足', src: why });
+      if (d < 0) out.push({ key: 'cashdiff', date: c.date, need: 'dr', def: '655', cr: CASH, amt: -d, tax: '0', desc: '現金過不足:不足', tekiyo: '現金過不足', src: why });
     } else if (which === 'sr') {
       // 売上精算書：売上（Ａ表）は 売掛金／売上、差し引かれるもの（Ｂ表）は 経費／売掛金。
       // これまでのJDLの仕訳と同じく、本体と消費税は別の行にし、摘要は発行者の名前にする
@@ -579,7 +595,7 @@ html, body { margin: 0; }
     const mn = m => `${Number(m.slice(5))}月分`;
     $('balTitle').textContent = `月末残高（${M}月${Number(END.slice(8))}日時点）`;
     $('bal').innerHTML = `
-      <div class="tile"><span>111 現金</span><b>${yen(cash)}</b><details><summary>計算のもと</summary><ul><li>前月末 ${yen(CLIENT.cashOpening)}円＋今月の入出金</li></ul></details></div>
+      <div class="tile"><span>111 現金</span><b>${yen(cash)}</b><details><summary>計算のもと</summary><ul><li>前月末 ${yen(CLIENT.cashOpening)}円＋今月の入出金${CLIENT.countDiff ? `＋現金過不足 ${yen(CLIENT.countDiff)}円` : ''}</li></ul></details></div>
       <div class="tile"><span>162 売掛金（売上精算書の未入金）</span><b>${yen(sum(ar))}</b><details><summary>内訳 ${ar.length}件</summary><ul>${ar.map(r => `<li>${mn(r.m)} ${yen(r.left)}円</li>`).join('') || '<li>なし</li>'}</ul></details></div>
       <div class="tile"><span>312 買掛金（仕入の未払い）</span><b>${yen(sum(ap))}</b><details><summary>内訳 ${ap.length}件</summary><ul>${ap.map(r => `<li>${mn(r.m)} ${esc(r.name)} ${yen(r.left)}円</li>`).join('') || '<li>なし</li>'}</ul></details></div>`;
   }

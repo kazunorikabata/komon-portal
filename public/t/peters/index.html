@@ -535,16 +535,20 @@ footer { font-size: 12px; color: var(--ink-soft); display: grid; gap: 4px; }
   const snum = v => { v = String(v ?? '').trim().replace(/[−ー－]/g, '-').replace(/,/g, ''); const n = Math.round(Number(v)); return v === '' || !isFinite(n) ? undefined : n || undefined; };
   const splitText = o => TAX.filter(([k]) => o[k]).map(([k, l]) => `${l.replace('対象', '').replace('（軽減）', '')} ${yen(o[k])}`).join('／');
 
+  // 現金は、直前の現金残高確認で数えた額を起点にする（差額は現金過不足として、数えた額に合わせる）
+  function cashBal(upTo, incl) {
+    const c = Object.values(state.counts || {}).filter(c => c?.date && c.date < upTo).sort((a, b) => a.date < b.date ? -1 : 1).pop();
+    let bal = c ? countTotal(c) : state.opening.cash || 0;
+    for (const r of state.rows.cash) if (r.date && (!c || r.date > c.date) && (incl ? r.date <= upTo : r.date < upTo)) bal += (r.in || 0) - (r.out || 0);
+    return bal;
+  }
   function openingFor(key, m) {
+    if (key === 'cash') return cashBal(`${m}-01`, false);
     let bal = state.opening[key] || 0;
     for (const r of state.rows[key]) if (r.date && r.date < `${m}-01`) bal += (r.in || 0) - (r.out || 0);
     return bal;
   }
-  function bookCashAt(date) {
-    let bal = state.opening.cash || 0;
-    for (const r of state.rows.cash) if (r.date && r.date <= date) bal += (r.in || 0) - (r.out || 0);
-    return bal;
-  }
+  const bookCashAt = date => cashBal(date, true);
   const countTotal = c => DENOMS.reduce((s, v) => s + v * (Number(c?.['d' + v]) || 0), 0);
 
   function renderTabs() {
@@ -606,10 +610,18 @@ footer { font-size: 12px; color: var(--ink-soft); display: grid; gap: 4px; }
       const k = isCash ? '<td></td>' : '';
       html += `<thead><tr><th>日付</th>${isCash ? '<th>区分</th>' : ''}<th>内容</th><th>相手先</th><th class="num">入金</th><th class="num">出金</th><th class="num">残高</th><th></th></tr></thead><tbody>`;
       html += `<tr class="carry"><td class="date">${md(view.month + '-01')}</td>${k}<td>前月から繰越</td><td></td><td></td><td></td><td class="num">${yen(bal)}</td><td></td></tr>`;
+      const c = isCash && state.counts[view.month];
+      let adj = c?.date ? countTotal(c) - bookCashAt(c.date) : 0;
+      const adjRow = () => {
+        const v = adj; adj = 0; bal += v; if (v > 0) tin += v; else tout -= v;
+        return `<tr class="carry"><td class="date">${md(c.date)}</td>${k}<td>現金過不足（現金残高確認の差額）<small>${esc(c.memo || '')}</small></td><td></td><td class="num in">${v > 0 ? yen(v) : ''}</td><td class="num out">${v < 0 ? yen(-v) : ''}</td><td class="num">${yen(bal)}</td><td></td></tr>`;
+      };
       for (const r of rows) {
+        if (adj && r.date > c.date) html += adjRow();
         bal += (r.in || 0) - (r.out || 0); tin += r.in || 0; tout += r.out || 0;
         html += `<tr><td class="date">${md(r.date)}</td>${kindCell(r)}${descCell(r)}<td>${esc(r.partner)}</td><td class="num in">${yen(r.in)}</td><td class="num out">${yen(r.out)}</td><td class="num">${yen(bal)}</td><td>${actions(r)}</td></tr>`;
       }
+      if (adj) html += adjRow();
       if (!rows.length) html += `<tr><td colspan="${isCash ? 8 : 7}" class="empty">この月の記入はまだありません。上の「記入する」から追加してください。</td></tr>`;
       html += `<tr class="total"><td></td>${k}<td>今月の合計</td><td></td><td class="num in">${yen(tin)}</td><td class="num out">${yen(tout)}</td><td class="num">${yen(bal)}</td><td></td></tr></tbody>`;
     } else {
@@ -1843,7 +1855,7 @@ tfoot td { font-weight: bold; background: #f6f6f6; }
     const [sy] = start.split('-');
     $('monthLabel').textContent = `${sy}年度`;
     let h = `<div class="ledger-head"><h2>年間一覧　${monthName(months[0])}〜${monthName(months[11])}</h2><p>月を押すと、その月の帳簿が開きます。</p></div>
-      <div class="table-box"><table><thead><tr><th>月</th><th>現金出納帳</th><th>売上精算書</th><th>仕入一覧</th><th class="num">件数</th><th class="num">現金 月末残高</th><th class="num">現金確認の差額</th><th class="num">売上精算の支払金額</th><th class="num">仕入の請求額</th></tr></thead><tbody>`;
+      <div class="table-box"><table><thead><tr><th>月</th>${Object.values(BOOKS).map(n => `<th>${n}</th>`).join('')}<th class="num">件数</th><th class="num">現金 月末残高</th><th class="num">現金確認の差額</th><th class="num">売上精算の支払金額</th><th class="num">仕入の請求額</th></tr></thead><tbody>`;
     for (const m of months) {
       const future = m > thisYM;
       const n = ORDER.reduce((s, k) => s + state.rows[k].filter(r => inMonth(r, m)).length, 0);
