@@ -1025,7 +1025,7 @@ tfoot td { font-weight: bold; }
         <th class="num">総支給額</th><th class="num">社会保険料</th><th class="num">住民税</th><th class="num">差引支給額</th><th></th></tr></thead><tbody>`;
     for (const e of emps) {
       const x = payRow(m, e.id) || {}, has = !!payRow(m, e.id), c = calcOf(m, e);
-      h += `<tr><td><b>${esc(e.name)}</b><small style="display:block;color:var(--ink-soft)">${P().TYPES[e.type || 'monthly']} ${yen(e.base)}円・${esc(e.col || '甲')}${e.col !== '乙' && e.col !== '丙' ? ` 扶養${n0(e.deps)}人` : ''}${ageNote(e, m) ? `<br>${ageNote(e, m)}` : ''}</small></td>
+      h += `<tr><td><b>${esc(e.name)}</b><small style="display:block;color:var(--ink-soft)">${P().TYPES[e.type || 'monthly']} ${yen(e.base)}円・${esc(e.col || '甲')}${e.col !== '丙' && (e.col !== '乙' || n0(e.deps)) ? ` 扶養${n0(e.deps)}人` : ''}${ageNote(e, m) ? `<br>${ageNote(e, m)}` : ''}</small></td>
         <td class="num">${inp(e, 'days', x.days)}</td>
         <td class="num">${inp(e, 'hours', x.hours)}</td>
         <td class="num">${e.otRate ? inp(e, 'otHours', x.otHours) : ''}</td>
@@ -1037,7 +1037,7 @@ tfoot td { font-weight: bold; }
     }
     if (!emps.length) h += `<tr><td colspan="12" class="empty">従業員が登録されていません。下の「従業員の登録・変更」から登録してください。</td></tr>`;
     h += `<tr class="total"><td>合計</td><td colspan="6"></td><td class="num" id="pt-gross"></td><td class="num" id="pt-shaho"></td><td class="num" id="pt-rtax"></td><td class="num" id="pt-net"></td><td></td></tr></tbody></table></div>
-      <p class="hint" style="margin:0;font-size:12px;color:var(--ink-soft)">数字を入れた人が、その月に給与を払う人になります。時給の人は労働時間、日給の人は出勤日数を入れてください。その他の支給・控除はマイナスも入れられます（欠勤控除など）。源泉所得税は甲欄の人は自動で計算します。乙欄・丙欄の人は税額表で調べて入れてください。</p>
+      <p class="hint" style="margin:0;font-size:12px;color:var(--ink-soft)">数字を入れた人が、その月に給与を払う人になります。時給の人は労働時間、日給の人は出勤日数を入れてください。その他の支給・控除はマイナスも入れられます（欠勤控除など）。源泉所得税は甲欄・乙欄の人は自動で計算します。丙欄の人は税額表（日額表）で調べて入れてください。</p>
       <div style="display:flex;flex-wrap:wrap;gap:8px">
         <button type="button" class="btn ghost" id="empOpen">従業員の登録・変更</button>
         <button type="button" class="btn ghost" id="rtaxOpen">住民税の入力</button>
@@ -1158,7 +1158,7 @@ tfoot td { font-weight: bold; }
         <div class="sr-sec"><h4>税金</h4>
           <div class="fields">
             <label class="f" for="ef-col">源泉所得税の区分<select id="ef-col">${[['甲', '甲欄（扶養控除等申告書を出している）'], ['乙', '乙欄（出していない）'], ['丙', '丙欄（日雇い）']].map(([k, l]) => `<option value="${k}"${(e.col || '甲') === k ? ' selected' : ''}>${l}</option>`).join('')}</select></label>
-            <label class="f" for="ef-deps">扶養親族等の数（甲欄）<input type="number" id="ef-deps" min="0" value="${e.deps ?? 0}"></label>
+            <label class="f" for="ef-deps">扶養親族等の数（甲欄。乙欄は「従たる給与についての扶養控除等申告書」の人数）<input type="number" id="ef-deps" min="0" value="${e.deps ?? 0}"></label>
             <p class="hint" style="margin:0;font-size:12px;color:var(--ink-soft);align-self:end">住民税は、給与の画面の「住民税の入力」で年度ごとに入れます。</p>
           </div></div>
         <div class="sr-sec"><h4>毎月決まった控除（食事代など）</h4>${[0, 1].map(i => pair('deductions', i, '控除')).join('')}</div>
