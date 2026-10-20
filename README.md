@@ -1,6 +1,6 @@
 # 顧問先専用ページ
 
-顧問先が現金出納帳・売上精算書・仕入一覧・給与（合計）を入力して毎月提出し、事務所がそれを仕訳にしてJDL用のCSVを出すためのしくみです。
+顧問先が現金出納帳・売上精算書・仕入一覧・給与（合計）を入力して毎月提出し、事務所がそれを仕訳にしてJDL・MJS用のCSVを出すためのしくみです。
 
 - 顧問先のページ：`https://c-xxxx.kabaoffice.com`（顧問先ごとに別のアドレス）
 - 事務所のページ：`https://office.kabaoffice.com`
@@ -25,7 +25,7 @@
 | `src/worker.js` | ログインの確認、権限の判定、API |
 | `public/t/<ひな形>/index.html` | 顧問先のページ。顧問先ごとに使うひな形を選ぶ（`peters`・`std`） |
 | `src/templates.js` | ひな形の一覧（名前と説明） |
-| `public/office/index.html` | 事務所のページ（仕訳変換・JDL出力・月末残高・修正依頼の承認・顧問先の登録） |
+| `public/office/index.html` | 事務所のページ（仕訳変換・JDL／MJS出力・月末残高・修正依頼の承認・顧問先の登録） |
 | `migrations/0001_init.sql` | データベースの表 |
 | `wrangler.toml` | Cloudflare の設定 |
 
