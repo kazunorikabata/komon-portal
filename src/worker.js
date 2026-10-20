@@ -95,6 +95,8 @@ const same = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
 // 提出は帳簿ごと。提出済みの帳簿の中身は直せない。入金・支払の記録、修正依頼、履歴はいつでも足せる
 const BOOK_FIELDS = { cash: ['rows', 'count'], sr: ['sr'], pl: ['inv'], wage: ['wage'] };
 const BOOK_NAMES = { cash: '現金出納帳', sr: '売上精算書', pl: '仕入一覧', wage: '給与' };
+// 標準のひな形の出納帳は 'cb:出納帳のID' で提出し、中身は cb[出納帳のID] にある
+const bookData = (d, b) => b.startsWith('cb:') ? [d.cb?.[b.slice(3)]] : (BOOK_FIELDS[b] || []).map(f => d[f]);
 // 以前の「月まとめて」の提出（文字列）は、3つとも提出済みとみなす
 const subMap = v => typeof v === 'string' ? { cash: v, sr: v, pl: v } : (v && typeof v === 'object' ? v : {});
 
@@ -102,7 +104,7 @@ function clientMonthRule(oldData, newData) {
   const o = oldData || {}, n = newData || {};
   const os = subMap(o.submitted), ns = subMap(n.submitted);
   for (const b of Object.keys(os)) {
-    if (os[b] && ns[b] !== os[b]) return `提出済みの${BOOK_NAMES[b] || '帳簿'}の提出を取り消すことはできません。事務所に修正を依頼してください。`;
+    if (os[b] && ns[b] !== os[b]) return `提出済みの${BOOK_NAMES[b] || '出納帳'}の提出を取り消すことはできません。事務所に修正を依頼してください。`;
   }
   // 修正依頼：追加だけ。承認は事務所しかできない
   const or = o.requests || [], nr = n.requests || [];
@@ -112,8 +114,8 @@ function clientMonthRule(oldData, newData) {
   const ol = o.log || [], nl = n.log || [];
   if (nl.length < ol.length || ol.some((r, i) => !same(r, nl[i]))) return '履歴は変えられません。';
   // 提出済みの帳簿の中身
-  for (const [b, fields] of Object.entries(BOOK_FIELDS)) {
-    if (os[b] && fields.some(f => !same(o[f], n[f]))) return `${BOOK_NAMES[b]}は提出済みです。直すときは事務所に修正を依頼してください。`;
+  for (const b of Object.keys(os)) {
+    if (os[b] && !same(bookData(o, b), bookData(n, b))) return `${BOOK_NAMES[b] || 'この出納帳'}は提出済みです。直すときは事務所に修正を依頼してください。`;
   }
   return null;
 }
@@ -200,7 +202,8 @@ async function officeApi(request, env, url, email) {
     const { results } = await env.DB.prepare('SELECT at, email, action, detail FROM audit WHERE client_id = ? ORDER BY id DESC LIMIT 200').bind(clientId).all();
     return json({ audit: results });
   }
-  const dm = rest.match(/^\/doc\/(master|office|m:\d{4}-\d{2})$/);
+  // config は顧問先ページの設定（出納帳の種類など）。顧問先は読めるが、書けるのは事務所だけ
+  const dm = rest.match(/^\/doc\/(master|office|config|m:\d{4}-\d{2})$/);
   if (dm && method === 'PUT') {
     const body = await request.json().catch(() => null);
     if (!body || typeof body.data !== 'object' || !Number.isInteger(body.version)) return fail(400, '送られた内容が正しくありません。');

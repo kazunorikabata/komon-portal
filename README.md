@@ -23,7 +23,7 @@
 | ファイル | 内容 |
 |---|---|
 | `src/worker.js` | ログインの確認、権限の判定、API |
-| `public/t/<ひな形>/index.html` | 顧問先のページ。顧問先ごとに使うひな形を選ぶ（今は `peters` だけ） |
+| `public/t/<ひな形>/index.html` | 顧問先のページ。顧問先ごとに使うひな形を選ぶ（`peters`・`std`） |
 | `src/templates.js` | ひな形の一覧（名前と説明） |
 | `public/office/index.html` | 事務所のページ（仕訳変換・JDL出力・月末残高・修正依頼の承認・顧問先の登録） |
 | `migrations/0001_init.sql` | データベースの表 |
@@ -73,9 +73,10 @@ kabaoffice.com を Cloudflare に追加して、Xserver でネームサーバー
 
 顧問先のページは、顧問先ごとに「ひな形」を選んで使います。
 - `peters`：現金出納帳（入金・経費精算・その他）、売上精算書・入金確認、仕入一覧（請求書）、給与（全員分の合計）
+- `std`（標準）：出納帳をいくつでも持てる。出納帳ごとに、記入の種類（入金・出金・経費精算）、入力する項目（相手先・部署・科目・登録番号）、現金残高確認票、経費精算書の印刷を選ぶ。設定は事務所のページの「顧問先ページの設定」で行い、データベースの `config` に保存する（顧問先は読むだけで書けない）
 - ほかの顧問先用の画面は、`public/t/<名前>/index.html` を作り、`src/templates.js` に名前と説明を足します
 - 事務所のページで顧問先を追加するときに、使うひな形を選びます
-- 事務所のページの仕訳変換は、今は `peters` 用だけです（`public/office/index.html` の `JOURNAL_TEMPLATES`）
+- 事務所のページの仕訳変換は、今は `peters` と `std` 用です（`public/office/index.html` の `JOURNAL_TEMPLATES`）
 
 ## データベースの変更（migrations）を足したとき
 `migrations/` に新しい SQL を足したときは、D1 の「コンソール」でその SQL を実行してから公開してください。

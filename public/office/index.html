@@ -134,6 +134,10 @@ html, body { margin: 0; }
 .pill.none { background: transparent; color: var(--ink-soft); border: 1px dashed var(--rule); }
 .link-btn { background: none; border: 0; padding: 2px 4px; cursor: pointer; font: inherit; font-size: 13px; color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
 .link-btn.danger { color: var(--bad); }
+.cfg-book { border: 1px solid var(--rule); border-radius: 4px; padding: 12px 14px; display: grid; gap: 10px; margin: 0; min-width: 0; }
+.cfg-book legend { font-weight: 500; padding: 0 6px; }
+.checks { display: flex; flex-wrap: wrap; gap: 6px 16px; align-items: center; font-size: 13px; }
+.checks > span { color: var(--ink-soft); font-size: 12px; min-width: 7em; }
 </style>
 </head>
 <body>
@@ -171,6 +175,7 @@ html, body { margin: 0; }
       </div>
       <div class="foot"><span class="msg" id="nmMsg" role="status"></span><button type="button" class="btn ghost" id="nmAdd">メールアドレスを追加する</button></div>
     </details>
+    <details id="cfgBox" hidden><summary>顧問先ページの設定（出納帳の種類と入力の方法）</summary><div id="cfgEdit" style="display:grid;gap:12px"></div></details>
   </section>
 
   <p class="hint" id="tplNote" hidden></p>
@@ -186,12 +191,7 @@ html, body { margin: 0; }
     <p class="hint">このしくみで記録した分から計算しています。始める前からの残高は含みません。</p>
   </section>
 
-  <nav class="tabs" role="tablist" id="tabs">
-    <button type="button" role="tab" id="tab-cash" data-book="cash" aria-selected="true">現金出納帳</button>
-    <button type="button" role="tab" id="tab-sr" data-book="sr" aria-selected="false">売上精算書</button>
-    <button type="button" role="tab" id="tab-pl" data-book="pl" aria-selected="false">仕入一覧</button>
-    <button type="button" role="tab" id="tab-wage" data-book="wage" aria-selected="false">給与</button>
-  </nav>
+  <nav class="tabs" role="tablist" id="tabs"></nav>
 
   <p class="hint">赤い行は科目が未設定です。科目を選ぶと、同じ内容の取引には次回から自動で同じ科目が入ります。税区分は顧問先が入力した税率から自動で入ります。必要なら直してください。</p>
   <div class="table-box"><table id="journal"></table></div>
@@ -210,8 +210,8 @@ html, body { margin: 0; }
         <label class="f" for="s-skc">課税売上の課区（コード）<input type="text" id="s-skc" inputmode="numeric"></label>
         <label class="f" for="s-skn">課税売上の課区（名称）<input type="text" id="s-skn"></label>
       </div></details>
-      <label class="check" for="s-withPay"><input type="checkbox" id="s-withPay">入金・支払（預金）の仕訳も出す</label>
-      <p class="hint" style="margin-top:-6px">売上精算書の入金や仕入の振込を通帳から別に入力している場合は、二重にならないようチェックを外したままにしてください。</p>
+      <label class="check" for="s-withPay" id="withPayWrap"><input type="checkbox" id="s-withPay">入金・支払（預金）の仕訳も出す</label>
+      <p class="hint" style="margin-top:-6px" id="withPayHint">売上精算書の入金や仕入の振込を通帳から別に入力している場合は、二重にならないようチェックを外したままにしてください。</p>
       <div class="foot">
         <span class="msg" id="exportMsg" role="status"></span>
         <button type="button" class="btn" id="exportBtn">CSVを保存する</button>
@@ -255,12 +255,46 @@ html, body { margin: 0; }
   // 選んでいる顧問先のデータ（サーバーから読み込む）
   let clients = [], current = null, docs = {}, CLIENT = null, templates = {};
   // 仕訳変換ができる画面の種類（ほかの種類は、その顧問先用の変換を作ってから足す）
-  const JOURNAL_TEMPLATES = ['peters'];
+  const JOURNAL_TEMPLATES = ['peters', 'std'];
+  const isStd = () => current?.template === 'std';
+  // 標準のひな形の出納帳（顧問先ページと同じ初期値）と、追加するときのひな形
+  const DEFAULT_BOOK = { id: 'main', name: '現金出納帳', acct: '111', opening: 0, kinds: ['in', 'out'], cols: { partner: true }, depts: [], inTypes: ['預金から引き出し', '売上から', 'その他'], count: true, expPrint: true };
+  const PRESETS = {
+    simple: ['シンプル（相手先・内容・金額）', { name: '現金出納帳', kinds: ['in', 'out'], cols: { partner: true }, inTypes: ['預金から引き出し', 'その他'], count: true, expPrint: false }],
+    detail: ['詳しく（科目・部署・登録番号も入力）', { name: '小口現金出納帳', kinds: ['in', 'out'], cols: { partner: true, dept: true, acct: true, invNo: true }, inTypes: ['売上より', '預金から引き出し', 'その他'], count: true, expPrint: false }],
+    exp: ['経費精算方式（立替をまとめて精算・精算書を印刷）', { name: '経費精算', kinds: ['in', 'exp'], cols: { partner: true }, inTypes: ['預金から引き出し', 'その他'], count: true, expPrint: true }],
+  };
+  const KIND_NAMES = { in: '入金', out: '出金', exp: '経費精算' };
+  const COL_NAMES = { partner: '相手先・支払先', dept: '部署', acct: '科目', invNo: '登録番号' };
+  let CFG = { cashbooks: [DEFAULT_BOOK], fyStart: 4 };
   const DENOMS = [10000, 5000, 2000, 1000, 500, 100, 50, 10, 5, 1];
   const countTotal = c => DENOMS.reduce((s, v) => s + v * (Number(c?.['d' + v]) || 0), 0);
   function buildClient() {
     const months = Object.keys(docs).filter(k => k.startsWith('m:')).map(k => k.slice(2)).sort();
     const md = m => docs['m:' + m]?.data || {};
+    if (isStd()) {
+      const cfg = docs.config?.data || {};
+      CFG = { fyStart: 4, ...cfg, cashbooks: cfg.cashbooks?.length ? cfg.cashbooks : [DEFAULT_BOOK] };
+      BOOKS = Object.fromEntries(CFG.cashbooks.map(b => ['cb:' + b.id, b.name]));
+      // 現金は、直前の現金残高確認で数えた額を起点にする（顧問先のページと同じ計算）
+      const books = CFG.cashbooks.map(b => {
+        const all = months.flatMap(m => md(m).cb?.[b.id]?.rows || []);
+        const counts = months.map(m => md(m).cb?.[b.id]?.count).filter(c => c?.date).sort((x, y) => x.date < y.date ? -1 : 1);
+        const cashBal = (upTo, incl) => {
+          const c = counts.filter(c => c.date < upTo).pop();
+          let bal = c ? countTotal(c) : Number(b.opening) || 0;
+          for (const r of all) if (r.date && (!c || r.date > c.date) && (incl ? r.date <= upTo : r.date < upTo)) bal += (r.in || 0) - (r.out || 0);
+          return bal;
+        };
+        const count = b.count !== false && md(THIS).cb?.[b.id]?.count?.date ? md(THIS).cb[b.id].count : null;
+        return { ...b, rows: md(THIS).cb?.[b.id]?.rows || [], cashOpening: cashBal(`${THIS}-01`, false), count, countDiff: count ? countTotal(count) - cashBal(count.date, true) : 0 };
+      });
+      CLIENT = { std: true, books, month: md(THIS) };
+      if (!BOOKS[book]) book = Object.keys(BOOKS)[0];
+      return;
+    }
+    BOOKS = PETERS_BOOKS;
+    if (!BOOKS[book]) book = 'cash';
     const master = docs.master?.data || {};
     const all = months.flatMap(m => md(m).rows || []);
     // 現金は、直前の現金残高確認で数えた額を起点にする（顧問先のページと同じ計算）
@@ -306,7 +340,8 @@ html, body { margin: 0; }
   // JDLの課区・税区 → 上の税区分（過去の仕訳から覚えるときに使う）
   const TAX_FROM_JDL = { '31/10': 'p10', '31/9': 'p8', '31/70': 'p8n', '31/71': 'p10n', '34/': 'n34', '/': '0', '0/': '0', '11/10': 's10', '11/9': 's8' };
   const CASH = '111', BANK = '130', FUKUGO = '997', URIKAKE = '162', KAIKAKE = '312';
-  const BOOKS = { cash: '現金出納帳', sr: '売上精算書', pl: '仕入一覧', wage: '給与' };
+  const PETERS_BOOKS = { cash: '現金出納帳', sr: '売上精算書', pl: '仕入一覧', wage: '給与' };
+  let BOOKS = PETERS_BOOKS;
 
   function defaultOffice(name) {
     return {
@@ -435,6 +470,30 @@ html, body { margin: 0; }
   }
 
   // 顧問先の入力 → 仕訳の行。need は科目を選ぶ側（'dr' か 'cr'）
+  // 標準のひな形の出納帳：入金は 現金／科目、出金・経費精算は 科目／現金。顧問先が科目を選んでいれば、それを使う
+  function stdJournals(bid, out) {
+    const b = CLIENT.books.find(x => x.id === bid);
+    if (!b) return;
+    const C = b.acct || CASH;
+    const taxOf = l => l.rate === '0' ? '0' : l.rate === '8' ? (l.noinv ? 'p8n' : 'p8') : (l.noinv ? 'p10n' : 'p10');
+    const join = (a, sep = ' ') => a.filter(Boolean).join(sep);
+    // 顧問先が選んだ科目がこの現金そのものなら、仕訳にならないので使わない
+    const hintOf = l => l.acct && l.acct !== C ? l.acct : undefined;
+    const info = l => join([l.dept && `部署 ${l.dept}`, l.acct && `顧問先の科目 ${l.acct}`, l.invNo, l.memo], '・');
+    for (const r of b.rows) {
+      if (r.kind === 'in') out.push({ key: r.id, date: r.date, dr: C, need: 'cr', hint: hintOf(r), amt: r.in, tax: '0', desc: r.desc || r.inType,
+        tekiyo: join([r.partner, r.desc || r.inType]), src: join(['入金', r.inType, info(r)], '・') });
+      else if (r.kind === 'out') out.push({ key: r.id, date: r.date, need: 'dr', cr: C, hint: hintOf(r), amt: r.out, tax: taxOf(r), desc: r.desc,
+        tekiyo: join([r.partner, r.desc]), src: join(['出金', info(r)], '・'), noInv: !!r.noinv && r.rate !== '0' });
+      // 経費精算は、現金を渡した精算日の日付にする
+      else if (r.kind === 'exp') r.lines.forEach((l, i) => out.push({ key: `${r.id}:${i}`, date: r.date, need: 'dr', cr: C, hint: hintOf(l), amt: l.amount, tax: taxOf(l), desc: l.desc,
+        tekiyo: join([l.partner, l.desc]), src: join([`経費精算（報告 ${r.reporter}）`, l.date && `支払 ${md(l.date)}`, info(l)], '・'), noInv: !!l.noinv && l.rate !== '0' }));
+    }
+    const c = b.count, d = b.countDiff, why = `現金残高確認の差額${c?.memo ? '・' + c.memo : ''}`;
+    if (d > 0) out.push({ key: 'cashdiff', date: c.date, dr: C, need: 'cr', def: '819', amt: d, tax: '0', desc: '現金過不足:過剰', tekiyo: '現金過不足', src: why });
+    if (d < 0) out.push({ key: 'cashdiff', date: c.date, need: 'dr', def: '655', cr: C, amt: -d, tax: '0', desc: '現金過不足:不足', tekiyo: '現金過不足', src: why });
+  }
+
   function journals(which) {
     const out = [];
     const BUCKET_TAX = { t10: 'p10', t8: 'p8', ot: '0' };
@@ -445,7 +504,8 @@ html, body { margin: 0; }
       for (const k of ks) out.push({ ...base, key: `${base.key}:${k}`, amt: o[k], tax: noInv && k === 't8' ? 'p8n' : noInv && k === 't10' ? 'p10n' : BUCKET_TAX[k], bucket: k, need: side,
         [side === 'dr' ? 'cr' : 'dr']: fixed, desc, tekiyo: ks.length > 1 ? `${desc}・${BUCKET_NAME[k]}` : desc, src, noInv: noInv && k !== 'ot' });
     };
-    if (which === 'cash') {
+    if (which.startsWith('cb:')) stdJournals(which.slice(3), out);
+    else if (which === 'cash') {
       for (const r of CLIENT.cash) {
         if (r.kind === 'in' && r.inType === 'bank') out.push({ key: r.id, date: r.date, dr: CASH, cr: FUKUGO, amt: r.in, tax: '0', desc: '預金引出', tekiyo: '預金引出', src: '入金：預金から引き出し' });
         else if (r.kind === 'in') out.push({ key: r.id, date: r.date, dr: CASH, need: 'cr', amt: r.in, tax: 's10', desc: '現金売上', tekiyo: '現金売上', src: '入金：現金売上' });
@@ -525,12 +585,13 @@ html, body { margin: 0; }
     }
     // 事務所の設定（上書き・覚えた科目）を重ねる
     for (const j of out) {
-      j.key = `${THIS}|${j.key}`;
+      j.key = `${THIS}|${which.startsWith('cb:') ? which + '|' : ''}${j.key}`;
       const o = state.over[j.key] || {};
       if (j.need) {
         const ruled = state.rules[j.desc] || learned(state.rules, j.desc);
-        j[j.need] = o.acct || ruled || j.def || '';
-        j.auto = !o.acct && !!(ruled || j.def);
+        const hint = j.hint && acct(j.hint) ? j.hint : '';
+        j[j.need] = o.acct || hint || ruled || j.def || '';
+        j.auto = !o.acct && !!(hint || ruled || j.def) && (hint ? '顧問先が選んだ科目です' : '前回と同じ科目を自動で入れました');
         const tr = state.taxRules?.[normDesc(j.desc)];
         if (j.bucket === 'ot' && tr) j.tax = tr;
         if (!o.tax && j[j.need] && acct(j[j.need])?.noTax) j.tax = '0';
@@ -564,7 +625,8 @@ html, body { margin: 0; }
     const ms = monthState(); $('submitted').className = 'pill ' + ms.cls; $('submitted').textContent = ms.label;
     $('clientTitle').textContent = `${current.name} 様`;
     $('monthLabel').textContent = `${Y}年${M}月分`;
-    for (const b of Object.keys(BOOKS)) $('tab-' + b).setAttribute('aria-selected', String(b === book));
+    $('tabs').innerHTML = Object.entries(BOOKS).map(([b, name]) => `<button type="button" role="tab" id="tab-${esc(b)}" data-book="${esc(b)}" aria-selected="${b === book}">${esc(name)}</button>`).join('');
+    $('withPayWrap').hidden = $('withPayHint').hidden = isStd();
     renderBal();
     const js = journals(book);
     const all = Object.keys(BOOKS).flatMap(b => journals(b));
@@ -578,7 +640,7 @@ html, body { margin: 0; }
     for (const j of js) {
       const missing = j.need && !j[j.need];
       const side = s => j.need === s
-        ? `<select id="acct-${j.key}" data-acct="${j.key}" class="${missing ? 'need' : ''}" aria-label="${md(j.date)} ${esc(j.desc)}の科目">${acctOptions(j[s])}</select>${j.auto ? '<div class="auto">前回と同じ科目を自動で入れました</div>' : ''}`
+        ? `<select id="acct-${j.key}" data-acct="${j.key}" class="${missing ? 'need' : ''}" aria-label="${md(j.date)} ${esc(j.desc)}の科目">${acctOptions(j[s])}</select>${j.auto ? `<div class="auto">${j.auto}</div>` : ''}`
         : fixedCell(j[s]);
       h += `<tr class="${missing ? 'need' : ''}"><td class="date">${md(j.date)}</td><td>${side('dr')}</td><td>${side('cr')}</td><td class="num">${yen(j.amt)}</td>
         <td><select id="tax-${j.key}" data-tax="${j.key}" aria-label="税区分">${Object.entries(TAXES).map(([k, t]) => `<option value="${k}"${k === j.tax ? ' selected' : ''}>${t.label}</option>`).join('')}</select></td>
@@ -590,6 +652,14 @@ html, body { margin: 0; }
   }
 
   function renderBal() {
+    if (CLIENT.std) {
+      $('balTitle').textContent = `月末残高（${M}月${Number(END.slice(8))}日時点）`;
+      $('bal').innerHTML = CLIENT.books.map(b => {
+        const cash = b.cashOpening + b.rows.reduce((t, r) => t + (r.in || 0) - (r.out || 0), 0) + b.countDiff;
+        return `<div class="tile"><span>${esc(b.acct || CASH)} ${esc(b.name)}</span><b>${yen(cash)}</b><details><summary>計算のもと</summary><ul><li>前月末 ${yen(b.cashOpening)}円＋今月の入出金${b.countDiff ? `＋現金過不足 ${yen(b.countDiff)}円` : ''}</li></ul></details></div>`;
+      }).join('');
+      return;
+    }
     const { cash, ar, ap } = balances();
     const sum = a => a.reduce((t, r) => t + r.left, 0);
     const mn = m => `${Number(m.slice(5))}月分`;
@@ -701,7 +771,8 @@ html, body { margin: 0; }
           if (code && /^\d+$/.test(code) && !state.accts.some(a => a.code === code)) { state.accts.push({ code, name: z(name), noTax: false }); added++; }
         }
         // 現金の取引だけを覚える（顧問先が入力するのは現金出納帳なので）
-        const other = r[6] === CASH ? r[2] : r[2] === CASH ? r[6] : null;
+        const cashCodes = isStd() ? CFG.cashbooks.map(b => b.acct || CASH) : [CASH];
+        const other = cashCodes.includes(r[6]) ? r[2] : cashCodes.includes(r[2]) ? r[6] : null;
         if (!other || other === FUKUGO) continue;
         const d = normDesc(z(r[11]));
         if (!d) continue;
@@ -718,6 +789,7 @@ html, body { margin: 0; }
       state.accts.sort((a, b) => Number(a.code) - Number(b.code));
       save(); render();
       m.className = 'msg ok'; m.textContent = `${rows}行の仕訳から、摘要${n}件の科目を覚えました。科目を${added}件追加しました。`;
+      if (added) syncCfgAccts();
     } catch (err) { m.className = 'msg'; m.textContent = err.message || 'CSVを読めませんでした。'; }
     e.target.value = '';
   });
@@ -737,6 +809,7 @@ html, body { margin: 0; }
     $('a-code').value = ''; $('a-name').value = '';
     save(); render();
     m.className = 'msg ok'; m.textContent = `${code} ${name} を追加しました。`;
+    syncCfgAccts();
   });
 
 
@@ -753,6 +826,104 @@ html, body { margin: 0; }
     const a = document.createElement('a'); a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 60000);
     m.className = 'msg ok'; m.textContent = `${count}行の仕訳を保存しました。`;
+  });
+
+  /* ---------- 顧問先ページの設定（標準のひな形の出納帳） ---------- */
+
+  let cfgDraft = null, cfgDirty = false;
+  const list = v => String(v || '').split(/[,、，\n]/).map(x => x.trim()).filter(Boolean);
+  function loadCfgDraft() {
+    const cfg = docs.config?.data || {};
+    cfgDraft = JSON.parse(JSON.stringify({ fyStart: 4, ...cfg, cashbooks: cfg.cashbooks?.length ? cfg.cashbooks : [DEFAULT_BOOK] }));
+    cfgDirty = false;
+  }
+  // 出納帳にもう記入があるか（あれば外せない）
+  const bookUsed = bid => Object.entries(docs).some(([k, d]) => k.startsWith('m:') && (d.data.cb?.[bid]?.rows?.length || d.data.cb?.[bid]?.count));
+
+  function renderCfg() {
+    $('cfgBox').hidden = !isStd();
+    if (!isStd()) return;
+    if (!cfgDraft) loadCfgDraft();
+    const C = cfgDraft;
+    const chk = (i, f, on, label) => `<label class="check" for="cf-${i}-${f}"><input type="checkbox" id="cf-${i}-${f}" data-b="${i}" data-f="${f}"${on ? ' checked' : ''}>${label}</label>`;
+    $('cfgEdit').innerHTML = `
+      <p class="hint">顧問先のページに出す出納帳と、それぞれの入力のしかたを決めます。出納帳ごとに別々に提出します。変えたら「設定を保存する」を押してください。</p>
+      ${C.cashbooks.map((b, i) => `<fieldset class="cfg-book"><legend>出納帳 ${i + 1}</legend>
+        <div class="fields">
+          <label class="f" for="cf-${i}-name">名前<input type="text" id="cf-${i}-name" data-b="${i}" data-f="name" value="${esc(b.name)}"></label>
+          <label class="f" for="cf-${i}-acct">JDLの科目（この現金）<select id="cf-${i}-acct" data-b="${i}" data-f="acct">${acctOptions(b.acct || CASH)}</select></label>
+          <label class="f" for="cf-${i}-opening">使い始める前の残高（円）<input type="number" id="cf-${i}-opening" data-b="${i}" data-f="opening" value="${Number(b.opening) || 0}"></label>
+        </div>
+        <div class="checks"><span>記入の種類</span>${Object.entries(KIND_NAMES).map(([k, l]) => chk(i, 'kind:' + k, b.kinds.includes(k), l)).join('')}</div>
+        <div class="checks"><span>入力する項目</span>${Object.entries(COL_NAMES).map(([k, l]) => chk(i, 'col:' + k, b.cols?.[k], l)).join('')}<span style="min-width:0">（日付・内容・金額・税率・インボイスなしは必ず入力）</span></div>
+        <div class="fields">
+          <label class="f" for="cf-${i}-inTypes">入金の種類（カンマ区切り）<input type="text" id="cf-${i}-inTypes" data-b="${i}" data-f="inTypes" value="${esc((b.inTypes || []).join('、'))}" placeholder="例：売上より、預金から引き出し、その他"></label>
+          <label class="f" for="cf-${i}-depts">部署の候補（カンマ区切り）<input type="text" id="cf-${i}-depts" data-b="${i}" data-f="depts" value="${esc((b.depts || []).join('、'))}" placeholder="例：事務所、フロント、コース管理"></label>
+        </div>
+        <div class="checks">${chk(i, 'count', b.count !== false, '提出の前に現金残高確認票を記入する')}${chk(i, 'expPrint', b.expPrint !== false, '経費精算書を印刷できるようにする')}</div>
+        <div class="foot"><span class="hint">ID：${esc(b.id)}</span>${C.cashbooks.length > 1 ? `<button type="button" class="link-btn danger" data-rmbook="${i}">この出納帳を外す</button>` : ''}</div>
+      </fieldset>`).join('')}
+      <div class="fields" style="align-items:end">
+        <label class="f" for="cf-preset">出納帳を追加する<select id="cf-preset">${Object.entries(PRESETS).map(([k, [l]]) => `<option value="${k}">${esc(l)}</option>`).join('')}</select></label>
+        <div><button type="button" class="btn ghost" id="cf-add">追加する</button></div>
+        <label class="f" for="cf-fy">事業年度の始まりの月（年間一覧）<select id="cf-fy">${Array.from({ length: 12 }, (_, k) => `<option value="${k + 1}"${Number(C.fyStart) === k + 1 ? ' selected' : ''}>${k + 1}月</option>`).join('')}</select></label>
+      </div>
+      <div class="foot"><span class="msg" id="cfMsg" role="status">${cfgDirty ? 'まだ保存していない変更があります。' : ''}</span><button type="button" class="btn" id="cf-save">設定を保存する</button></div>`;
+  }
+
+  async function saveCfg() {
+    const m = $('cfMsg');
+    const bad = cfgDraft.cashbooks.find(b => !b.name.trim() || !b.kinds.length);
+    if (bad) { m.className = 'msg'; m.textContent = '出納帳ごとに、名前と記入の種類（1つ以上）を決めてください。'; return; }
+    // 顧問先が選べる科目は、事務所の科目一覧の写し
+    const data = { ...cfgDraft, accts: state.accts.map(a => ({ code: a.code, name: a.name })) };
+    try {
+      const r = await api(`/api/office/clients/${current.id}/doc/config`, { method: 'PUT', body: JSON.stringify({ data, version: docs.config?.version || 0 }) });
+      docs.config = { data, version: r.version };
+      cfgDirty = false; render(); renderCfg();
+      $('cfMsg').className = 'msg ok'; $('cfMsg').textContent = '保存しました。顧問先のページを開き直すと反映されます。';
+    } catch (err) { m.className = 'msg'; m.textContent = err.message; if (err.status === 409) showReload(err.message); }
+  }
+
+  // 科目一覧を変えたら、顧問先が選べる科目（設定の写し）も入れ替える
+  async function syncCfgAccts() {
+    if (!isStd() || !docs.config) return;
+    const data = { ...docs.config.data, accts: state.accts.map(a => ({ code: a.code, name: a.name })) };
+    try {
+      const r = await api(`/api/office/clients/${current.id}/doc/config`, { method: 'PUT', body: JSON.stringify({ data, version: docs.config.version }) });
+      docs.config = { data, version: r.version };
+    } catch (err) { setSync(err.message, true); }
+  }
+
+  $('cfgEdit').addEventListener('input', e => {
+    const t = e.target, i = t.dataset.b, f = t.dataset.f;
+    if (t.id === 'cf-fy') { cfgDraft.fyStart = Number(t.value); cfgDirty = true; return; }
+    if (i === undefined) return;
+    const b = cfgDraft.cashbooks[Number(i)];
+    if (f.startsWith('kind:')) { const k = f.slice(5); b.kinds = Object.keys(KIND_NAMES).filter(x => x === k ? t.checked : b.kinds.includes(x)); }
+    else if (f.startsWith('col:')) b.cols = { ...b.cols, [f.slice(4)]: t.checked };
+    else if (f === 'count' || f === 'expPrint') b[f] = t.checked;
+    else if (f === 'opening') b.opening = Math.round(Number(t.value)) || 0;
+    else if (f === 'inTypes' || f === 'depts') b[f] = list(t.value);
+    else b[f] = t.value;
+    cfgDirty = true; $('cfMsg').className = 'msg'; $('cfMsg').textContent = 'まだ保存していない変更があります。';
+  });
+  $('cfgEdit').addEventListener('click', e => {
+    const t = e.target;
+    if (t.id === 'cf-save') { saveCfg(); return; }
+    if (t.id === 'cf-add') {
+      const [, p] = PRESETS[$('cf-preset').value];
+      let n = cfgDraft.cashbooks.length + 1, bid;
+      do bid = 'b' + n++; while (cfgDraft.cashbooks.some(b => b.id === bid));
+      cfgDraft.cashbooks.push({ ...JSON.parse(JSON.stringify(p)), id: bid, acct: CASH, opening: 0, depts: [] });
+      cfgDirty = true; renderCfg(); return;
+    }
+    if (t.dataset.rmbook !== undefined) {
+      const b = cfgDraft.cashbooks[Number(t.dataset.rmbook)];
+      if (bookUsed(b.id)) { $('cfMsg').className = 'msg'; $('cfMsg').textContent = `「${b.name}」にはもう記入があるので外せません。名前を変えて使い続けてください。`; return; }
+      cfgDraft.cashbooks.splice(Number(t.dataset.rmbook), 1);
+      cfgDirty = true; renderCfg();
+    }
   });
 
   /* ---------- 顧問先の管理・修正依頼 ---------- */
@@ -792,7 +963,8 @@ html, body { margin: 0; }
     }
     try { localStorage.setItem('office-client', id || ''); } catch (e) {}
     lastLoaded = Date.now();
-    render();
+    cfgDraft = null;
+    render(); renderCfg();
   }
 
   // 顧問先が送ったデータを読み込み直す（科目の設定などを保存中のときは待つ）
@@ -805,7 +977,8 @@ html, body { margin: 0; }
     await loadClients(); current = clients.find(c => c.id === current.id) || current;
     lastLoaded = Date.now();
     setSync(`${new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })} に最新の状態を読み込みました`);
-    render();
+    if (!cfgDirty) cfgDraft = null;
+    render(); renderCfg();
   }
   $('refreshBtn').addEventListener('click', () => refresh().catch(err => showReload(err.message)));
   // 別のタブから戻ってきたときは、1分以上たっていれば自動で読み込み直す
