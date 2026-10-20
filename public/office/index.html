@@ -524,7 +524,8 @@ html, body { margin: 0; }
   function payJournals(out) {
     const pd = CLIENT.pay, P = CFG.payroll || {};
     if (!pd?.rows) return;
-    const d = pd.date || END, h = `${M}月分給与`, PAY = P.acctPay || '318';
+    // 摘要の「〇月分」は、計算期間の終わりの月（翌月払いなら前の月）
+    const d = pd.date || END, h = `${Number(Payroll.period(THIS, P).to.slice(5, 7))}月分給与`, PAY = P.acctPay || '318';
     const t = {}, add = (k, v) => { t[k] = (t[k] || 0) + (Number(v) || 0); };
     const named = {};
     for (const e of CLIENT.employees) {
@@ -1082,12 +1083,16 @@ html, body { margin: 0; }
   const accessBooks = C => [...C.cashbooks, ...(C.payroll?.enabled ? [{ id: 'pay', name: C.payroll.name || '給与' }] : [])];
   function payCfgHtml(C) {
     const p = C.payroll || {}, r = { ...Payroll.DEFAULT_RATES, ...p.rates }, t = { ...Payroll.DEFAULT_TAX, ...p.tax };
+    const daySel = (path, label, v) => `<label class="f" for="pf-${path}">${label}<select id="pf-${path}" data-pf="${path}"><option value="0"${!Number(v) ? ' selected' : ''}>末日</option>${Array.from({ length: path === 'closeDay' ? 28 : 31 }, (_, k) => `<option value="${k + 1}"${Number(v) === k + 1 ? ' selected' : ''}>${k + 1}日</option>`).join('')}</select></label>`;
     const num = (path, label, v, ph = '') => `<label class="f" for="pf-${path}">${label}<input type="number" step="any" id="pf-${path}" data-pf="${path}" value="${v ?? ''}" placeholder="${ph}"></label>`;
     return `<fieldset class="cfg-book"><legend>給与計算</legend>
       <label class="check" for="pf-enabled"><input type="checkbox" id="pf-enabled" data-pf="enabled"${p.enabled ? ' checked' : ''}>顧問先のページで給与計算を使う（一人ずつ入力して、明細・賃金台帳・仕訳を出す）</label>
       ${p.enabled ? `<div class="fields">
         <label class="f" for="pf-name">タブの名前<input type="text" id="pf-name" data-pf="name" value="${esc(p.name || '給与')}"></label>
-        ${num('payDay', '支給日（毎月の日にち）', p.payDay ?? 25)}
+        ${daySel('closeDay', '締め日', p.closeDay ?? 0)}
+        <label class="f" for="pf-payLag">支払う月<select id="pf-payLag" data-pf="payLag"><option value="0"${!Number(p.payLag) ? ' selected' : ''}>締め日と同じ月（当月払い）</option><option value="1"${Number(p.payLag) ? ' selected' : ''}>締め日の翌月（翌月払い）</option></select></label>
+        ${daySel('payDay', '支給日', p.payDay ?? 25)}
+        <p class="hint" style="grid-column:1/-1;margin:0">計算期間：${esc(Payroll.period(THIS, p).label)}　→　支給日 ${esc(Payroll.payDate(THIS, p).replace(/-/g, '/'))}（${esc(Payroll.ruleText(p))}・${M}月の場合）</p>
         <label class="f" for="pf-lag">社会保険料の引き方<select id="pf-lag" data-pf="lag"><option value="1"${(p.lag ?? 1) == 1 ? ' selected' : ''}>翌月徴収（前月分を引く）</option><option value="0"${p.lag == 0 ? ' selected' : ''}>当月徴収（その月の分を引く）</option></select></label>
         <label class="f" for="pf-acctPay">未払の科目（給与の相手科目）<select id="pf-acctPay" data-pf="acctPay">${acctOptions(p.acctPay || '318')}</select></label>
       </div>
@@ -1141,10 +1146,10 @@ html, body { margin: 0; }
     if (t.dataset.pf) {
       const p = cfgDraft.payroll ||= { enabled: false, name: '給与', payDay: 25, rates: { ...Payroll.DEFAULT_RATES }, tax: { ...Payroll.DEFAULT_TAX } };
       const path = t.dataset.pf.split('.');
-      const v = t.type === 'checkbox' ? t.checked : t.type === 'number' || t.dataset.pf === 'lag' ? (t.value === '' ? '' : Number(t.value)) : t.value;
+      const v = t.type === 'checkbox' ? t.checked : t.type === 'number' || ['lag', 'closeDay', 'payDay', 'payLag'].includes(t.dataset.pf) ? (t.value === '' ? '' : Number(t.value)) : t.value;
       if (path.length === 2) (p[path[0]] ||= {})[path[1]] = v; else p[path[0]] = v;
       cfgDirty = true;
-      if (t.dataset.pf === 'enabled') renderCfg();
+      if (['enabled', 'closeDay', 'payDay', 'payLag'].includes(t.dataset.pf)) renderCfg();
       $('cfMsg').className = 'msg'; $('cfMsg').textContent = 'まだ保存していない変更があります。';
       return;
     }

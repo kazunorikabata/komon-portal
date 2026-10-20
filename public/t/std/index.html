@@ -428,6 +428,7 @@ td.partner { min-width: 7em; }
   const yen = n => (n || n === 0) ? Number(n).toLocaleString('ja-JP') : '';
   const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const monthName = m => { const [y, mo] = m.split('-'); return `${y}年${Number(mo)}月`; };
+  const mmName = monthName;
   const shiftMonth = (m, delta) => { const [y, mo] = m.split('-').map(Number); const dt = new Date(y, mo - 1 + delta, 1); return ym(dt.getFullYear(), dt.getMonth() + 1); };
   const monthEnd = m => { const [y, mo] = m.split('-').map(Number); return `${m}-${String(new Date(y, mo, 0).getDate()).padStart(2, '0')}`; };
   const defDate = () => today.startsWith(view.month) ? today : `${view.month}-01`;
@@ -478,7 +479,7 @@ td.partner { min-width: 7em; }
       ? '科目は、わかる範囲で選んでください。わからなければ空欄のままで構いません（事務所で付けます）。'
       : '勘定科目は事務所で付けますので、内容と金額だけ入力してください。わからない取引は「メモ」に書いておいてください。';
     if (view.mode === 'year') { renderYear(); return; }
-    $('ledgerTitle').textContent = `${b.name}　${monthName(view.month)}`;
+    $('ledgerTitle').textContent = `${b.name}　${monthName(view.month)}${b.isPay ? '支給' : ''}`;
     $('payBox').hidden = !b.isPay;
     $('cashPanel').hidden = $('tableBox').hidden = !!b.isPay;
     if (b.isPay) { $('ledgerHint').textContent = ''; renderPay(); renderSubmit(); return; }
@@ -868,6 +869,7 @@ tfoot td { font-weight: bold; }
 
   function renderSubmit() {
     const bar = $('submitBar'), b = BK(), m = view.month, name = b.name, useCount = b.count !== false;
+    const monthName = mm => b.isPay ? `${mmName(mm)}支給` : mmName(mm) + '分';
     if (lockedBook(m, b.id)) {
       const c = useCount && state.counts[b.id]?.[m];
       const line = c ? `現金残高確認：${md(c.date)} ${esc(c.checker)}さんが確認、数えた現金 ${yen(countTotal(c))}円、差額 ${diffText(countTotal(c) - bookCashAt(b, c.date))}` : '';
@@ -878,7 +880,7 @@ tfoot td { font-weight: bold; }
       else if (view.reqForm) action = `<div class="req-form"><label class="f" for="req-reason">${esc(name)}で直したい内容と理由<input type="text" id="req-reason" placeholder="例：15日の駐車場代を書き忘れていました"></label>
         <div class="form-foot"><span class="msg" id="reqMsg" role="status"></span><div style="display:flex;gap:8px"><button type="button" class="btn ghost" id="reqCancel">やめる</button><button type="button" class="btn" id="reqSend">修正を依頼する</button></div></div></div>`;
       else action = `<button type="button" class="btn ghost" id="reqOpen">${esc(name)}の修正を依頼する</button>`;
-      bar.innerHTML = `<div style="display:grid;gap:4px;min-width:0;flex:1 1 20em"><p>${monthName(m)}分の${esc(name)}は ${subOf(m)[bkey(b.id)]} に提出しました。事務所で確認します。</p>${line ? `<p style="font-size:13px;color:var(--ink-soft)">${line}</p>` : ''}
+      bar.innerHTML = `<div style="display:grid;gap:4px;min-width:0;flex:1 1 20em"><p>${monthName(m)}の${esc(name)}は ${subOf(m)[bkey(b.id)]} に提出しました。事務所で確認します。</p>${line ? `<p style="font-size:13px;color:var(--ink-soft)">${line}</p>` : ''}
         ${pend ? `<p style="font-size:13px">依頼した内容：${esc(pend.reason)}（${pend.at}）</p>` : ''}</div>${action}${historyHtml(m)}`;
     } else if (view.submitStep === 'count') {
       const c = view.countDraft || state.counts[b.id]?.[m] || { date: today.startsWith(m) ? today : monthEnd(m) };
@@ -891,15 +893,15 @@ tfoot td { font-weight: bold; }
       updateCount();
     } else if (view.submitStep === 'confirm') {
       bar.className = 'submit-bar';
-      bar.innerHTML = `<p style="flex:1 1 20em">${monthName(m)}分の${esc(name)}を提出します。提出したあとは、修正を依頼しないと直せません。</p>
+      bar.innerHTML = `<p style="flex:1 1 20em">${monthName(m)}の${esc(name)}を提出します。提出したあとは、修正を依頼しないと直せません。</p>
         <div style="display:flex;gap:8px"><button type="button" class="btn ghost" id="cancelSubmit">戻る</button><button type="button" class="btn" id="doSubmit">提出する</button></div>`;
     } else {
       const n = rowsOf(b.id, m).length;
       const msg = reopened(m, b.id) ? `${esc(name)}の修正依頼が承認されたので、直せる状態です。直し終わったら、もう一度提出してください。`
-        : b.isPay ? `${monthName(m)}分の${esc(name)}の入力が終わったら提出してください。出納帳とは別に提出できます。`
-        : `${monthName(m)}分の${esc(name)}の記入が終わったら提出してください（現在 ${n} 件）。${useCount ? '提出の前に、現金残高確認票を記入します。' : ''}${CONFIG.cashbooks.length > 1 ? 'ほかの出納帳とは別に提出できます。' : ''}`;
+        : b.isPay ? `${monthName(m)}の${esc(name)}の入力が終わったら提出してください。出納帳とは別に提出できます。`
+        : `${monthName(m)}の${esc(name)}の記入が終わったら提出してください（現在 ${n} 件）。${useCount ? '提出の前に、現金残高確認票を記入します。' : ''}${CONFIG.cashbooks.length > 1 ? 'ほかの出納帳とは別に提出できます。' : ''}`;
       bar.className = 'submit-bar';
-      bar.innerHTML = `<p style="flex:1 1 20em">${msg}</p><button type="button" class="btn" id="askSubmit">${monthName(m)}分の${esc(name)}を${reopened(m, b.id) ? '再提出' : '提出'}する</button>${historyHtml(m)}`;
+      bar.innerHTML = `<p style="flex:1 1 20em">${msg}</p><button type="button" class="btn" id="askSubmit">${monthName(m)}の${esc(name)}を${reopened(m, b.id) ? '再提出' : '提出'}する</button>${historyHtml(m)}`;
     }
   }
 
@@ -955,7 +957,8 @@ tfoot td { font-weight: bold; }
   const empActive = (e, m) => e.active !== false && (!e.joined || e.joined.slice(0, 7) <= m) && (!e.left || e.left.slice(0, 7) >= m);
   const empsOf = m => (state.employees || []).filter(e => empActive(e, m));
   const payRow = (m, eid) => state.pay[m]?.rows?.[eid];
-  const defPeriod = m => `${Number(m.slice(5))}月1日〜${Number(monthEnd(m).slice(8))}日`;
+  // 賃金の計算期間（事務所で決めた締め日・支払う月から）
+  const defPeriod = m => P().period(m, payCfg()).label;
   const calcOf = (m, e) => P().calc(e, payRow(m, e.id) || {}, payCfg().rates, payCfg().tax, { month: m, lag: payCfg().lag ?? 1 });
   // 年齢で決まる社会保険の対象（名前の下に出す）
   function ageNote(e, m) {
@@ -986,8 +989,8 @@ tfoot td { font-weight: bold; }
     const emps = empsOf(m);
     // まだその月の給与を作っていない：月給の人を入れて始める
     if (!state.pay[m]) {
-      box.innerHTML = `<div class="entry"><h3>${monthName(m)}分の給与はまだ作っていません</h3>
-        <p style="margin:0">「この月の給与を作る」を押すと、月給の人が入った表ができます。時給・日給の人は、表に時間や日数を入れると入ります。</p>
+      box.innerHTML = `<div class="entry"><h3>${monthName(m)}支給の給与はまだ作っていません</h3>
+        <p style="margin:0">支給日 ${P().payDate(m, payCfg()).replace(/-/g, '/')}、計算期間 ${defPeriod(m)}（${P().ruleText(payCfg())}）です。「この月の給与を作る」を押すと、月給の人が入った表ができます。時給・日給の人は、表に時間や日数を入れると入ります。</p>
         <div style="display:flex;flex-wrap:wrap;gap:8px">${lock ? '' : `<button type="button" class="btn" id="payStart"${emps.length ? '' : ' disabled'}>この月の給与を作る</button>`}
           <button type="button" class="btn ghost" id="empOpen">従業員の登録・変更</button>
           <button type="button" class="btn ghost" id="ledgerOpen"${(state.employees || []).length ? '' : ' disabled'}>賃金台帳</button></div>
@@ -1001,8 +1004,9 @@ tfoot td { font-weight: bold; }
     let h = `${warn.map(w => `<p class="warn">${w}</p>`).join('')}
       <div class="fields">
         <label class="f" for="py-date">支給日<input type="date" id="py-date" value="${pd.date || ''}"${dis}></label>
-        <label class="f wide" for="py-period">賃金の計算期間<input type="text" id="py-period" value="${esc(pd.period || defPeriod(m))}"${dis}></label>
+        <label class="f wide" for="py-period">賃金の計算期間（${esc(P().ruleText(payCfg()))}）<input type="text" id="py-period" value="${esc(pd.period || defPeriod(m))}"${dis}></label>
       </div>
+      <p class="hint" style="margin:0;font-size:12px;color:var(--ink-soft)">出勤日数・労働時間・残業時間は、この計算期間の分を入れてください。</p>
       <div class="table-box"><table class="pay"><thead><tr>
         <th>氏名</th><th class="num">出勤日数</th><th class="num">労働時間</th><th class="num">残業時間</th><th class="num">その他の支給</th><th class="num">その他の控除</th><th class="num">源泉所得税</th>
         <th class="num">総支給額</th><th class="num">社会保険料</th><th class="num">住民税</th><th class="num">差引支給額</th><th></th></tr></thead><tbody>`;
@@ -1076,8 +1080,7 @@ tfoot td { font-weight: bold; }
     if (t.id === 'empOpen') { view.empEdit = 'list'; renderPay(); return; }
     if (t.id === 'ledgerOpen') { view.ledgerEmp = (state.employees || [])[0]?.id; view.ledgerYear = Number(m.slice(0, 4)); renderPay(); return; }
     if (t.id === 'payStart' && !locked()) {
-      const dd = String(Math.min(n0(payCfg().payDay) || 25, Number(monthEnd(m).slice(8)))).padStart(2, '0');
-      state.pay[m] = { date: `${m}-${dd}`, rows: Object.fromEntries(empsOf(m).filter(e => (e.type || 'monthly') === 'monthly').map(e => [e.id, {}])) };
+      state.pay[m] = { date: P().payDate(m, payCfg()), period: defPeriod(m), rows: Object.fromEntries(empsOf(m).filter(e => (e.type || 'monthly') === 'monthly').map(e => [e.id, {}])) };
       save(); renderPay(); renderStatus(); renderTabs(); return;
     }
     if (t.id === 'slipAll') { printSlips(m, (state.employees || []).filter(x => payRow(m, x.id))); return; }
@@ -1189,7 +1192,7 @@ tfoot td { font-weight: bold; }
     const row = (l, v) => v ? `<tr><td>${esc(l)}</td><td class="n">${yen(v)}</td></tr>` : '';
     const pays = [[P().TYPES[c.type] === '月給' ? '基本給' : `${P().TYPES[c.type]}分`, c.basePay], ['残業手当', c.ot], ...(e.allowances || []).map(a => [a.name, n0(a.amount)]), ['その他の支給', c.extraPay], ['通勤手当', c.commute]];
     const deds = [['健康保険', c.health], ['介護保険', c.care], ['子ども・子育て支援金', c.kids], ['厚生年金', c.pension], ['雇用保険', c.emp], ['所得税', c.itax], ['住民税', c.rtax], ...(e.deductions || []).map(a => [a.name, n0(a.amount)]), ['その他の控除', c.extraDed]];
-    return `<div class="slip"><h2>給与明細書　${monthName(m)}分</h2>
+    return `<div class="slip"><h2>給与明細書　${monthName(m)}支給</h2>
       <div class="hd"><span>${esc(CLIENT_NAME)}</span><span class="who">${esc(e.name)} 様</span></div>
       <div class="hd small"><span>支給日 ${pd.date ? pd.date.replace(/-/g, '/') : ''}</span><span>計算期間 ${esc(pd.period || defPeriod(m))}</span><span>出勤 ${yen(x.days) || 0}日　労働 ${yen(x.hours) || 0}時間　残業 ${yen(x.otHours) || 0}時間</span></div>
       <div class="cols"><table><thead><tr><th colspan="2">支給</th></tr></thead><tbody>${pays.map(([l, v]) => row(l, v)).join('')}</tbody><tfoot><tr><td>総支給額</td><td class="n">${yen(c.gross)}</td></tr></tfoot></table>

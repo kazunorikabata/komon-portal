@@ -74,6 +74,21 @@
       pension: pm < reachMonth(birth, 70),
     };
   }
+  // 締め日と支払う月から、支給の月（m）の賃金の計算期間を出す。closeDay 0 は末日締め、payLag 1 は翌月払い
+  const daysIn = m => { const [y, mo] = m.split('-').map(Number); return new Date(y, mo, 0).getDate(); };
+  const pad = v => String(v).padStart(2, '0');
+  function period(m, c) {
+    const close = n(c?.closeDay), E = shiftYM(m, -n(c?.payLag));
+    let from, to;
+    if (!close) { from = `${E}-01`; to = `${E}-${pad(daysIn(E))}`; }
+    else { const S = shiftYM(E, -1); from = `${S}-${pad(Math.min(close + 1, daysIn(S)))}`; to = `${E}-${pad(Math.min(close, daysIn(E)))}`; }
+    const jp = d => { const [, mo, dd] = d.split('-').map(Number); return `${mo}月${dd}日`; };
+    return { from, to, label: `${jp(from)}〜${jp(to)}` };
+  }
+  // 支給日（payDay 0 は末日）
+  const payDate = (m, c) => `${m}-${pad(n(c?.payDay ?? 25) ? Math.min(n(c?.payDay ?? 25), daysIn(m)) : daysIn(m))}`;
+  const ruleText = c => `${n(c?.closeDay) ? `${n(c.closeDay)}日` : '末日'}締め・${n(c?.payLag) ? '翌月' : '当月'}${n(c?.payDay ?? 25) ? `${n(c?.payDay ?? 25)}日` : '末日'}払い`;
+
   function ageAt(birth, date) {
     const [y, mo, d] = birth.split('-').map(Number), [Y, M, D] = date.split('-').map(Number);
     return Y - y - ((M < mo || (M === mo && D < d)) ? 1 : 0);
@@ -120,5 +135,5 @@
     return { age, premMonth: pm, type, basePay, ot, allow, extraPay, commute, taxable, gross, health, care, kids, pension, emp, shaho, col, autoTax, itax, rtax, fixedDed, extraDed, otherDed, net };
   }
 
-  window.Payroll = { STD_GRADES, gradeFor, calc, withholdKou, r50, ageFlags, ageAt, TYPES, DEFAULT_RATES, DEFAULT_TAX };
+  window.Payroll = { period, payDate, ruleText, STD_GRADES, gradeFor, calc, withholdKou, r50, ageFlags, ageAt, TYPES, DEFAULT_RATES, DEFAULT_TAX };
 })();
