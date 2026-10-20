@@ -93,8 +93,8 @@ const same = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
 
 // 顧問先が月のデータを書き換えるときの決まり（事務所は対象外）
 // 提出は帳簿ごと。提出済みの帳簿の中身は直せない。入金・支払の記録、修正依頼、履歴はいつでも足せる
-const BOOK_FIELDS = { cash: ['rows', 'count'], sr: ['sr'], pl: ['inv'], wage: ['wage'] };
-const BOOK_NAMES = { cash: '現金出納帳', sr: '売上精算書', pl: '仕入一覧', wage: '給与' };
+const BOOK_FIELDS = { cash: ['rows', 'count'], sr: ['sr'], pl: ['inv'], wage: ['wage'], pay: ['pay'] };
+const BOOK_NAMES = { cash: '現金出納帳', sr: '売上精算書', pl: '仕入一覧', wage: '給与', pay: '給与' };
 // 標準のひな形の出納帳は 'cb:出納帳のID' で提出し、中身は cb[出納帳のID] にある
 const bookData = (d, b) => b.startsWith('cb:') ? [d.cb?.[b.slice(3)]] : (BOOK_FIELDS[b] || []).map(f => d[f]);
 // 以前の「月まとめて」の提出（文字列）は、3つとも提出済みとみなす
@@ -122,7 +122,7 @@ function clientMonthRule(oldData, newData) {
 
 const MONTH_KEY = /^m:\d{4}-\d{2}$/;
 
-// 標準のひな形では、メールアドレスごとに入力できる出納帳を決められる（config の access）。
+// 標準のひな形では、メールアドレスごとに入力できる出納帳を決められる（config の access。給与計算は 'pay'）。
 // 指定のない人と事務所のスタッフは、すべての出納帳を使える
 async function allowedBooks(env, client, email, isStaff) {
   if (isStaff || client.template !== 'std') return null;
@@ -133,13 +133,21 @@ const pickBooks = (cb, keep) => Object.fromEntries(Object.entries(cb || {}).filt
 
 // 顧問先に渡すデータ：だれが何を使えるか（access）は渡さない。使えない出納帳の中身も渡さない
 function clientView(docs, allowed) {
+  // 給与を使えない人には、従業員の情報と給与の入力を渡さない
+  const noPay = allowed && !allowed.includes('pay');
+  if (noPay && docs.master?.data?.employees) { const { employees, ...m } = docs.master.data; docs.master = { ...docs.master, data: m }; }
   if (docs.config?.data) {
     const { access, ...cfg } = docs.config.data;
     if (allowed) cfg.cashbooks = (cfg.cashbooks || []).filter(b => allowed.includes(b.id));
+    if (noPay && cfg.payroll) cfg.payroll = { ...cfg.payroll, enabled: false };
     docs.config = { ...docs.config, data: cfg };
   }
   if (allowed) for (const [k, d] of Object.entries(docs)) {
-    if (MONTH_KEY.test(k) && d.data?.cb) docs[k] = { ...d, data: { ...d.data, cb: pickBooks(d.data.cb, id => allowed.includes(id)) } };
+    if (!MONTH_KEY.test(k)) continue;
+    const { pay, ...rest } = d.data || {};
+    const data = noPay ? rest : { ...d.data };
+    if (data.cb) data.cb = pickBooks(data.cb, id => allowed.includes(id));
+    docs[k] = { ...d, data };
   }
   return docs;
 }
@@ -150,7 +158,9 @@ function mergeAllowed(cur, next, allowed) {
   const cb = { ...pickBooks(o.cb, id => !allowed.includes(id)), ...pickBooks(n.cb, id => allowed.includes(id)) };
   const merged = { ...n, cb };
   if (!Object.keys(cb).length) delete merged.cb;
-  const os = subMap(o.submitted), ns = subMap(n.submitted), ok = k => k.startsWith('cb:') && allowed.includes(k.slice(3));
+  if (!allowed.includes('pay')) { if (o.pay !== undefined) merged.pay = o.pay; else delete merged.pay; }
+  const os = subMap(o.submitted), ns = subMap(n.submitted);
+  const ok = k => k.startsWith('cb:') ? allowed.includes(k.slice(3)) : k === 'pay' && allowed.includes('pay');
   for (const k of new Set([...Object.keys(os), ...Object.keys(ns)])) if (!ok(k) && os[k] !== ns[k]) return { error: 'この出納帳は入力できません。' };
   if ((n.requests || []).slice((o.requests || []).length).some(r => !ok(r.book || ''))) return { error: 'この出納帳は入力できません。' };
   return { data: merged };
@@ -181,6 +191,16 @@ async function clientApi(request, env, url, email, client, isStaff) {
       }
       const why = clientMonthRule(cur.data, body.data);
       if (why) return fail(423, why);
+    }
+    // 給与を使えない人が master を書くときは、従業員の情報を今のまま残す
+    if (key === 'master') {
+      const allowed = await allowedBooks(env, client, email, isStaff);
+      if (allowed && !allowed.includes('pay')) {
+        const cur = await getDoc(env, client.id, key);
+        if (cur.version !== body.version) return fail(409, 'ほかの人が先に更新しました。画面を読み込み直してください。');
+        const { employees, ...rest } = body.data;
+        body.data = cur.data?.employees ? { ...rest, employees: cur.data.employees } : rest;
+      }
     }
     const r = await putDoc(env, client.id, key, body.data, body.version, email);
     if (r.error) return fail(413, r.error);
@@ -289,6 +309,7 @@ export default {
       if (sub === env.OFFICE_HOST) {
         if (!isStaff) return withHeaders(new Response('このページを見る権限がありません。', { status: 403 }));
         if (url.pathname.startsWith('/api/')) return withHeaders(await officeApi(request, env, url, email));
+        if (url.pathname.startsWith('/lib/')) return withHeaders(await env.ASSETS.fetch(request));
         return withHeaders(await page(env, request, '/office/'));
       }
 
@@ -299,6 +320,7 @@ export default {
           WHERE c.subdomain = ? AND m.email = ?`).bind(sub, email).first();
       if (!client) return withHeaders(new Response('このページを見る権限がありません。', { status: 403 }));
       if (url.pathname.startsWith('/api/')) return withHeaders(await clientApi(request, env, url, email, client, isStaff));
+      if (url.pathname.startsWith('/lib/')) return withHeaders(await env.ASSETS.fetch(request));
       // 顧問先ごとのひな形の画面を返す
       const tpl = TEMPLATES[client.template] ? client.template : 'peters';
       return withHeaders(await page(env, request, `/t/${tpl}/`));
