@@ -42,9 +42,35 @@
 
   const TYPES = { monthly: '月給', hourly: '時給', daily: '日給' };
 
-  // e：従業員（登録内容）、x：その月の入力、R：料率、P：源泉の計算の額
+  // 年齢での判定。「〇歳に達した日」は誕生日の前日（年齢計算に関する法律）。月は 'YYYY-MM'
+  const ymOf = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+  const shiftYM = (m, k) => { const [y, mo] = m.split('-').map(Number); return ymOf(new Date(y, mo - 1 + k, 1)); };
+  function reachMonth(birth, age, onBirthday) {
+    const [y, mo, d] = birth.split('-').map(Number);
+    const day = new Date(y + age, mo - 1, d);
+    if (day.getMonth() !== mo - 1) day.setDate(0);   // 2月29日生まれで、うるう年でない年
+    if (!onBirthday) day.setDate(day.getDate() - 1);
+    return ymOf(day);
+  }
+  // 保険料の月（pm）に、どの保険の対象か。介護 40歳到達月〜65歳到達月の前月、厚生年金 70歳到達月の前月まで、
+  // 健康保険（介護・子ども・子育て支援金を含む）は75歳の誕生日の月の前月まで（後期高齢者医療へ移る）
+  function ageFlags(birth, pm) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(birth || '') || !pm) return null;
+    const health = pm < reachMonth(birth, 75, true);
+    return {
+      health,
+      care: health && reachMonth(birth, 40) <= pm && pm < reachMonth(birth, 65),
+      pension: pm < reachMonth(birth, 70),
+    };
+  }
+  function ageAt(birth, date) {
+    const [y, mo, d] = birth.split('-').map(Number), [Y, M, D] = date.split('-').map(Number);
+    return Y - y - ((M < mo || (M === mo && D < d)) ? 1 : 0);
+  }
+
+  // e：従業員（登録内容）、x：その月の入力、R：料率、P：源泉の計算の額、opt：{ month 支給の月, lag 社会保険料を前月分で引くなら1 }
   // x.ov に入れた額は、計算の代わりにその額を使う（事務所や顧問先が直したとき）
-  function calc(e, x, R, P) {
+  function calc(e, x, R, P, opt) {
     x = x || {}; R = { ...DEFAULT_RATES, ...R };
     const ov = x.ov || {}, pick = (k, v) => ov[k] !== undefined && ov[k] !== '' ? n(ov[k]) : v;
     const type = e.type || 'monthly';
@@ -56,14 +82,19 @@
     const taxable = basePay + ot + allow + extraPay;
     const gross = taxable + commute;
     let health = 0, care = 0, kids = 0, pension = 0;
+    // 生年月日があれば年齢で判定する。なければ登録のチェック（介護の対象か）を使う
+    const pm = opt?.month ? shiftYM(opt.month, -(n(opt.lag))) : null;
+    const age = ageFlags(e.birth, pm) || { health: true, care: !!e.care, pension: true };
     if (e.shaho && n(e.std) > 0) {
       const std = n(e.std);
-      // 介護保険の対象者は、健康保険と介護保険を合わせた料率で計算し、その中から介護分を分ける
-      const both = r50(std * (n(R.health) + (e.care ? n(R.care) : 0)) / 200);
-      care = e.care ? r50(std * n(R.care) / 200) : 0;
-      health = both - care;
-      kids = r50(std * n(R.kids) / 200);
-      pension = r50(Math.min(Math.max(std, 88000), 650000) * n(R.pension) / 200);
+      if (age.health) {
+        // 介護保険の対象者は、健康保険と介護保険を合わせた料率で計算し、その中から介護分を分ける
+        const both = r50(std * (n(R.health) + (age.care ? n(R.care) : 0)) / 200);
+        care = age.care ? r50(std * n(R.care) / 200) : 0;
+        health = both - care;
+        kids = r50(std * n(R.kids) / 200);
+      }
+      if (age.pension) pension = r50(Math.min(Math.max(std, 88000), 650000) * n(R.pension) / 200);
     }
     health = pick('health', health); care = pick('care', care); kids = pick('kids', kids); pension = pick('pension', pension);
     const emp = pick('emp', e.koyo ? r50(gross * n(R.emp) / 1000) : 0);
@@ -75,8 +106,8 @@
     const fixedDed = sum(e.deductions), extraDed = n(x.extraDed);
     const otherDed = fixedDed + extraDed;
     const net = gross - shaho - itax - rtax - otherDed;
-    return { type, basePay, ot, allow, extraPay, commute, taxable, gross, health, care, kids, pension, emp, shaho, col, autoTax, itax, rtax, fixedDed, extraDed, otherDed, net };
+    return { age, premMonth: pm, type, basePay, ot, allow, extraPay, commute, taxable, gross, health, care, kids, pension, emp, shaho, col, autoTax, itax, rtax, fixedDed, extraDed, otherDed, net };
   }
 
-  window.Payroll = { calc, withholdKou, r50, TYPES, DEFAULT_RATES, DEFAULT_TAX };
+  window.Payroll = { calc, withholdKou, r50, ageFlags, ageAt, TYPES, DEFAULT_RATES, DEFAULT_TAX };
 })();

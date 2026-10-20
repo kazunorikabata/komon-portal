@@ -956,7 +956,16 @@ tfoot td { font-weight: bold; }
   const empsOf = m => (state.employees || []).filter(e => empActive(e, m));
   const payRow = (m, eid) => state.pay[m]?.rows?.[eid];
   const defPeriod = m => `${Number(m.slice(5))}月1日〜${Number(monthEnd(m).slice(8))}日`;
-  const calcOf = (m, e) => P().calc(e, payRow(m, e.id) || {}, payCfg().rates, payCfg().tax);
+  const calcOf = (m, e) => P().calc(e, payRow(m, e.id) || {}, payCfg().rates, payCfg().tax, { month: m, lag: payCfg().lag ?? 1 });
+  // 年齢で決まる社会保険の対象（名前の下に出す）
+  function ageNote(e, m) {
+    if (!e.birth || !e.shaho) return '';
+    const pm = shiftMonth(m, -(Number(payCfg().lag ?? 1))), f = P().ageFlags(e.birth, pm), a = P().ageAt(e.birth, monthEnd(pm));
+    const parts = [`${a}歳`];
+    if (!f.health) parts.push('健康保険なし（75歳以上）'); else if (f.care) parts.push('介護あり');
+    if (!f.pension) parts.push('厚生年金なし（70歳以上）');
+    return parts.join('・');
+  }
   function payTotals(m) {
     const t = { count: 0, gross: 0, net: 0 };
     for (const e of state.employees || []) {
@@ -999,7 +1008,7 @@ tfoot td { font-weight: bold; }
         <th class="num">総支給額</th><th class="num">社会保険料</th><th class="num">住民税</th><th class="num">差引支給額</th><th></th></tr></thead><tbody>`;
     for (const e of emps) {
       const x = payRow(m, e.id) || {}, has = !!payRow(m, e.id), c = calcOf(m, e);
-      h += `<tr><td><b>${esc(e.name)}</b><small style="display:block;color:var(--ink-soft)">${P().TYPES[e.type || 'monthly']} ${yen(e.base)}円・${esc(e.col || '甲')}${e.col !== '乙' && e.col !== '丙' ? ` 扶養${n0(e.deps)}人` : ''}</small></td>
+      h += `<tr><td><b>${esc(e.name)}</b><small style="display:block;color:var(--ink-soft)">${P().TYPES[e.type || 'monthly']} ${yen(e.base)}円・${esc(e.col || '甲')}${e.col !== '乙' && e.col !== '丙' ? ` 扶養${n0(e.deps)}人` : ''}${ageNote(e, m) ? `<br>${ageNote(e, m)}` : ''}</small></td>
         <td class="num">${inp(e, 'days', x.days)}</td>
         <td class="num">${inp(e, 'hours', x.hours)}</td>
         <td class="num">${e.otRate ? inp(e, 'otHours', x.otHours) : ''}</td>
@@ -1086,7 +1095,7 @@ tfoot td { font-weight: bold; }
       const list = state.employees || [];
       box.innerHTML = `<div class="ledger-head"><h2>従業員の登録・変更</h2><button type="button" class="btn ghost" id="empBack">給与の入力に戻る</button></div>
         <div class="table-box"><table><thead><tr><th>氏名</th><th>給与の形</th><th class="num">基本給・単価</th><th>社会保険</th><th>雇用保険</th><th>税区分</th><th class="num">住民税</th><th>状態</th><th></th></tr></thead><tbody>
-        ${list.map(e => `<tr><td>${esc(e.name)}</td><td>${P().TYPES[e.type || 'monthly']}</td><td class="num">${yen(e.base)}</td><td>${e.shaho ? `加入（標準報酬 ${yen(e.std)}）${e.care ? '・介護' : ''}` : '—'}</td><td>${e.koyo ? '加入' : '—'}</td>
+        ${list.map(e => `<tr><td>${esc(e.name)}</td><td>${P().TYPES[e.type || 'monthly']}</td><td class="num">${yen(e.base)}</td><td>${e.shaho ? `加入（標準報酬 ${yen(e.std)}）${e.birth ? `・${ageNote(e, view.month)}` : e.care ? '・介護' : ''}` : '—'}</td><td>${e.koyo ? '加入' : '—'}</td>
           <td>${esc(e.col || '甲')}${(e.col || '甲') === '甲' ? ` 扶養${n0(e.deps)}人` : ''}</td><td class="num">${yen(e.rtax)}</td><td>${e.active === false ? '使わない' : e.left ? `${esc(e.left)} 退職` : '在籍'}</td>
           <td><button type="button" class="link-btn" data-empedit="${e.id}">直す</button></td></tr>`).join('') || '<tr><td colspan="9" class="empty">まだ登録がありません。</td></tr>'}
         </tbody></table></div>
@@ -1104,6 +1113,7 @@ tfoot td { font-weight: bold; }
           <label class="f" for="ef-type">給与の形<select id="ef-type">${Object.entries(P().TYPES).map(([k, l]) => `<option value="${k}"${(e.type || 'monthly') === k ? ' selected' : ''}>${l}</option>`).join('')}</select></label>
           <label class="f" for="ef-base">${unit}<input type="number" id="ef-base" value="${e.base ?? ''}"></label>
           <label class="f" for="ef-otRate">残業の時間単価（円・任意）<input type="number" id="ef-otRate" value="${e.otRate ?? ''}"></label>
+          <label class="f" for="ef-birth">生年月日（社会保険の年齢判定）<input type="date" id="ef-birth" value="${e.birth || ''}"></label>
           <label class="f" for="ef-joined">入社日（任意）<input type="date" id="ef-joined" value="${e.joined || ''}"></label>
           <label class="f" for="ef-left">退職日（任意）<input type="date" id="ef-left" value="${e.left || ''}"></label>
         </div>
@@ -1116,7 +1126,7 @@ tfoot td { font-weight: bold; }
           <div class="fields">
             <label class="check" for="ef-shaho"><input type="checkbox" id="ef-shaho"${e.shaho ? ' checked' : ''}>健康保険・厚生年金に加入</label>
             <label class="f" for="ef-std">標準報酬月額（円）<input type="number" id="ef-std" value="${e.std ?? ''}" placeholder="例：260000"></label>
-            <label class="check" for="ef-care"><input type="checkbox" id="ef-care"${e.care ? ' checked' : ''}>介護保険の対象（40〜64歳）</label>
+            <label class="check" for="ef-care"><input type="checkbox" id="ef-care"${e.care ? ' checked' : ''}>介護保険の対象（生年月日を入れたときは年齢で自動判定）</label>
             <label class="check" for="ef-koyo"><input type="checkbox" id="ef-koyo"${e.koyo ? ' checked' : ''}>雇用保険に加入</label>
           </div></div>
         <div class="sr-sec"><h4>税金</h4>
@@ -1133,7 +1143,7 @@ tfoot td { font-weight: bold; }
   }
   function readEmpForm() {
     const e = view.empDraft, v = id => $(id).value.trim(), num = id => optNum($(id).value);
-    Object.assign(e, { name: v('ef-name'), sex: v('ef-sex') || undefined, type: v('ef-type'), base: num('ef-base'), otRate: num('ef-otRate'), joined: v('ef-joined') || undefined, left: v('ef-left') || undefined,
+    Object.assign(e, { birth: v('ef-birth') || undefined, name: v('ef-name'), sex: v('ef-sex') || undefined, type: v('ef-type'), base: num('ef-base'), otRate: num('ef-otRate'), joined: v('ef-joined') || undefined, left: v('ef-left') || undefined,
       commuteType: v('ef-commuteType'), commute: num('ef-commute'), shaho: $('ef-shaho').checked, std: num('ef-std'), care: $('ef-care').checked, koyo: $('ef-koyo').checked,
       col: v('ef-col'), deps: num('ef-deps') || 0, rtax: num('ef-rtax'), active: !$('ef-active').checked });
     for (const [k, cnt] of [['allowances', 3], ['deductions', 2]]) e[k] = Array.from({ length: cnt }, (_, i) => ({ name: v(`ef-${k}-${i}-name`), amount: num(`ef-${k}-${i}-amount`) })).filter(x => x.name || x.amount);
