@@ -1015,6 +1015,7 @@ tfoot td { font-weight: bold; }
     const warn = [];
     if (emps.some(e => e.shaho) && !(n0(R.health) && n0(R.pension))) warn.push('社会保険料の料率が事務所でまだ設定されていません。');
     if (emps.some(e => e.koyo) && !n0(R.emp)) warn.push('雇用保険料の料率が事務所でまだ設定されていません。');
+    const hasManual = emps.some(e => e.type === 'manual');
     const inp = (e, k, v, attrs = '') => `<input type="text" inputmode="decimal" id="py-${e.id}-${k}" data-emp="${e.id}" data-k="${k}" value="${v ?? ''}" aria-label="${esc(e.name)} ${k}"${dis}${attrs}>`;
     let h = `${notes}${warn.map(w => `<p class="warn">${w}</p>`).join('')}
       <div class="fields">
@@ -1023,11 +1024,12 @@ tfoot td { font-weight: bold; }
       </div>
       <p class="hint" style="margin:0;font-size:12px;color:var(--ink-soft)">出勤日数・労働時間・残業時間は、この計算期間の分を入れてください。</p>
       <div class="table-box"><table class="pay"><thead><tr>
-        <th>氏名</th><th class="num">出勤日数</th><th class="num">労働時間</th><th class="num">残業時間</th><th class="num">その他の支給</th><th class="num">その他の控除</th><th class="num">源泉所得税</th>
+        <th>氏名</th>${hasManual ? '<th class="num">支給額（毎月入力）</th>' : ''}<th class="num">出勤日数</th><th class="num">労働時間</th><th class="num">残業時間</th><th class="num">その他の支給</th><th class="num">その他の控除</th><th class="num">源泉所得税</th>
         <th class="num">総支給額</th><th class="num">社会保険料</th><th class="num">住民税</th><th class="num">差引支給額</th><th></th></tr></thead><tbody>`;
     for (const e of emps) {
       const x = payRow(m, e.id) || {}, has = !!payRow(m, e.id), c = calcOf(m, e);
-      h += `<tr><td><b>${esc(e.name)}</b><small style="display:block;color:var(--ink-soft)">${P().TYPES[e.type || 'monthly']} ${yen(e.base)}円・${esc(e.col || '甲')}${e.col !== '丙' && (e.col !== '乙' || n0(e.deps)) ? ` 扶養${n0(e.deps)}人` : ''}${ageNote(e, m) ? `<br>${ageNote(e, m)}` : ''}</small></td>
+      h += `<tr><td><b>${esc(e.name)}</b><small style="display:block;color:var(--ink-soft)">${P().TYPES[e.type || 'monthly']}${e.type === 'manual' ? '' : ` ${yen(e.base)}円`}・${esc(e.col || '甲')}${e.col !== '丙' && (e.col !== '乙' || n0(e.deps)) ? ` 扶養${n0(e.deps)}人` : ''}${ageNote(e, m) ? `<br>${ageNote(e, m)}` : ''}</small></td>
+        ${hasManual ? `<td class="num">${e.type === 'manual' ? inp(e, 'amount', x.amount, ' placeholder="金額"') : ''}</td>` : ''}
         <td class="num">${inp(e, 'days', x.days)}</td>
         <td class="num">${inp(e, 'hours', x.hours)}</td>
         <td class="num">${e.otRate ? inp(e, 'otHours', x.otHours) : ''}</td>
@@ -1037,8 +1039,8 @@ tfoot td { font-weight: bold; }
         <td class="num" id="pc-${e.id}-gross"></td><td class="num" id="pc-${e.id}-shaho"></td><td class="num" id="pc-${e.id}-rtax"></td><td class="num"><b id="pc-${e.id}-net"></b></td>
         <td id="pc-${e.id}-act"></td></tr>`;
     }
-    if (!emps.length) h += `<tr><td colspan="12" class="empty">従業員が登録されていません。下の「従業員の登録・変更」から登録してください。</td></tr>`;
-    h += `<tr class="total"><td>合計</td><td colspan="6"></td><td class="num" id="pt-gross"></td><td class="num" id="pt-shaho"></td><td class="num" id="pt-rtax"></td><td class="num" id="pt-net"></td><td></td></tr></tbody></table></div>
+    if (!emps.length) h += `<tr><td colspan="${hasManual ? 13 : 12}" class="empty">従業員が登録されていません。下の「従業員の登録・変更」から登録してください。</td></tr>`;
+    h += `<tr class="total"><td>合計</td><td colspan="${hasManual ? 7 : 6}"></td><td class="num" id="pt-gross"></td><td class="num" id="pt-shaho"></td><td class="num" id="pt-rtax"></td><td class="num" id="pt-net"></td><td></td></tr></tbody></table></div>
       <p class="hint" style="margin:0;font-size:12px;color:var(--ink-soft)">数字を入れた人が、その月に給与を払う人になります。時給の人は労働時間、日給の人は出勤日数を入れてください。その他の支給・控除はマイナスも入れられます（欠勤控除など）。源泉所得税は甲欄・乙欄の人は自動で計算します。丙欄の人は税額表（日額表）で調べて入れてください。</p>
       <div style="display:flex;flex-wrap:wrap;gap:8px">
         <button type="button" class="btn ghost" id="empOpen">従業員の登録・変更</button>
@@ -1086,7 +1088,7 @@ tfoot td { font-weight: bold; }
     if (v === undefined) delete x[k]; else x[k] = v;
     // 時給・日給の人は、数字を全部消したら、その月は払わない人に戻す（月給の人は「今月は払わない」で外す）
     const emp = (state.employees || []).find(z => z.id === eid);
-    if (!Object.keys(x).length && emp && (emp.type || 'monthly') !== 'monthly') delete pd.rows[eid];
+    if (!Object.keys(x).length && emp && !P().isFixedMonthly(emp)) delete pd.rows[eid];
   }
   let payTimer = null;
   $('payBox').addEventListener('input', e => {
@@ -1104,7 +1106,7 @@ tfoot td { font-weight: bold; }
     if (t.id === 'empOpen') { view.empEdit = 'list'; renderPay(); return; }
     if (t.id === 'ledgerOpen') { view.ledgerEmp = (state.employees || [])[0]?.id; view.ledgerYear = Number(m.slice(0, 4)); renderPay(); return; }
     if (t.id === 'payStart' && !locked()) {
-      state.pay[m] = { date: P().payDate(m, payCfg()), period: defPeriod(m), rows: Object.fromEntries(empsOf(m).filter(e => (e.type || 'monthly') === 'monthly').map(e => [e.id, {}])) };
+      state.pay[m] = { date: P().payDate(m, payCfg()), period: defPeriod(m), rows: Object.fromEntries(empsOf(m).filter(e => P().isFixedMonthly(e)).map(e => [e.id, {}])) };
       save(); renderPay(); renderStatus(); renderTabs(); return;
     }
     if (t.id === 'slipAll') { printSlips(m, (state.employees || []).filter(x => payRow(m, x.id))); return; }
@@ -1122,7 +1124,7 @@ tfoot td { font-weight: bold; }
       const list = state.employees || [];
       box.innerHTML = `<div class="ledger-head"><h2>従業員の登録・変更</h2><button type="button" class="btn ghost" id="empBack">給与の入力に戻る</button></div>
         <div class="table-box"><table><thead><tr><th>氏名</th><th>給与の形</th><th class="num">基本給・単価</th><th>社会保険</th><th>雇用保険</th><th>税区分</th><th class="num">住民税</th><th>状態</th><th></th></tr></thead><tbody>
-        ${list.map(e => `<tr><td>${esc(e.name)}</td><td>${P().TYPES[e.type || 'monthly']}</td><td class="num">${yen(e.base)}</td><td>${e.shaho ? `加入（標準報酬 ${yen(e.std)}）${e.birth ? `・${ageNote(e, view.month)}` : e.care ? '・介護' : ''}` : '—'}</td><td>${e.koyo ? '加入' : '—'}</td>
+        ${list.map(e => `<tr><td>${esc(e.name)}</td><td>${P().TYPES[e.type || 'monthly']}</td><td class="num">${e.type === 'manual' ? '毎月入力' : yen(e.base)}</td><td>${e.shaho ? `加入（標準報酬 ${yen(e.std)}）${e.birth ? `・${ageNote(e, view.month)}` : e.care ? '・介護' : ''}` : '—'}</td><td>${e.koyo ? '加入' : '—'}</td>
           <td>${esc(e.col || '甲')}${(e.col || '甲') === '甲' ? ` 扶養${n0(e.deps)}人` : ''}</td><td class="num">${yen(P().rtaxFor(e, view.month))}</td><td>${e.active === false ? '使わない' : e.left ? `${esc(e.left)} 退職` : '在籍'}</td>
           <td><button type="button" class="link-btn" data-empedit="${e.id}">直す</button></td></tr>`).join('') || '<tr><td colspan="9" class="empty">まだ登録がありません。</td></tr>'}
         </tbody></table></div>
@@ -1131,14 +1133,14 @@ tfoot td { font-weight: bold; }
     }
     const e = view.empDraft;
     const pair = (k, i, l) => { const x = (e[k] || [])[i] || {}; return `<div class="pairs"><input type="text" id="ef-${k}-${i}-name" value="${esc(x.name || '')}" placeholder="${l}の名前" aria-label="${l}${i + 1}の名前"><input type="number" id="ef-${k}-${i}-amount" value="${x.amount ?? ''}" placeholder="金額" aria-label="${l}${i + 1}の金額"></div>`; };
-    const unit = { monthly: '基本給（月額・円）', hourly: '時給（円）', daily: '日給（円）' }[e.type || 'monthly'];
+    const unit = { monthly: '基本給（月額・円）', hourly: '時給（円）', daily: '日給（円）', manual: '' }[e.type || 'monthly'];
     box.innerHTML = `<div class="ledger-head"><h2>${e.name ? esc(e.name) + ' さん' : '従業員を追加'}</h2></div>
       <form class="entry emp-form" id="empForm" novalidate>
         <div class="fields">
           <label class="f" for="ef-name">氏名<input type="text" id="ef-name" value="${esc(e.name)}"></label>
           <label class="f" for="ef-sex">性別（任意・賃金台帳用）<select id="ef-sex"><option value=""></option>${['男', '女'].map(v => `<option${e.sex === v ? ' selected' : ''}>${v}</option>`).join('')}</select></label>
           <label class="f" for="ef-type">給与の形<select id="ef-type">${Object.entries(P().TYPES).map(([k, l]) => `<option value="${k}"${(e.type || 'monthly') === k ? ' selected' : ''}>${l}</option>`).join('')}</select></label>
-          <label class="f" for="ef-base">${unit}<input type="number" id="ef-base" value="${e.base ?? ''}"></label>
+          ${e.type === 'manual' ? `<p style="margin:0;font-size:12px;color:var(--ink-soft);align-self:end">支給額は、毎月の給与の画面で入れます。<input type="hidden" id="ef-base" value=""></p>` : `<label class="f" for="ef-base">${unit}<input type="number" id="ef-base" value="${e.base ?? ''}"></label>`}
           <label class="f" for="ef-otRate">残業の時間単価（円・任意）<input type="number" id="ef-otRate" value="${e.otRate ?? ''}"></label>
           <label class="f" for="ef-birth">生年月日（社会保険の年齢判定）<input type="date" id="ef-birth" value="${e.birth || ''}"></label>
           <label class="f" for="ef-joined">入社日（任意）<input type="date" id="ef-joined" value="${e.joined || ''}"></label>
@@ -1203,7 +1205,8 @@ tfoot td { font-weight: bold; }
     const emp = readEmpForm(), msgEl = $('efMsg');
     const fail = t => { msgEl.className = 'msg'; msgEl.textContent = t; };
     if (!emp.name) return fail('氏名を入力してください。');
-    if (!emp.base) return fail(`${{ monthly: '基本給', hourly: '時給', daily: '日給' }[emp.type]}を入力してください。`);
+    if (emp.type !== 'manual' && !emp.base) return fail(`${{ monthly: '基本給', hourly: '時給', daily: '日給' }[emp.type]}を入力してください。`);
+    if (emp.type === 'manual') delete emp.base;
     if (emp.shaho && !emp.std) return fail('社会保険に加入している人は、標準報酬月額を入力してください。');
     const list = state.employees ||= [], i = list.findIndex(x => x.id === emp.id);
     // 固定的賃金（給与の形・基本給や単価・手当・通勤手当）が変わったら、随時改定の判定のために記録する
@@ -1211,7 +1214,7 @@ tfoot td { font-weight: bold; }
       const o = list[i], parts = [];
       const sumA = a => (a || []).reduce((t, x) => t + n0(x.amount), 0);
       if ((o.type || 'monthly') !== (emp.type || 'monthly')) parts.push(`${P().TYPES[o.type || 'monthly']}→${P().TYPES[emp.type || 'monthly']}`);
-      if (n0(o.base) !== n0(emp.base)) parts.push(`${{ monthly: '基本給', hourly: '時給', daily: '日給' }[emp.type || 'monthly']} ${yen(o.base)}円→${yen(emp.base)}円`);
+      if (n0(o.base) !== n0(emp.base)) parts.push(`${{ monthly: '基本給', hourly: '時給', daily: '日給', manual: '基本給' }[emp.type || 'monthly']} ${yen(o.base)}円→${yen(emp.base)}円`);
       if (sumA(o.allowances) !== sumA(emp.allowances)) parts.push(`手当 ${yen(sumA(o.allowances))}円→${yen(sumA(emp.allowances))}円`);
       if (n0(o.commute) !== n0(emp.commute) || (o.commuteType || 'month') !== (emp.commuteType || 'month')) parts.push(`通勤手当 ${yen(o.commute)}円→${yen(emp.commute)}円`);
       emp.fixedChanges = [...(o.fixedChanges || []).filter(c => c.month !== view.month), { month: view.month, what: parts.join('、') }];
@@ -1317,7 +1320,7 @@ tfoot td { font-weight: bold; }
     const COLS = 6;
     const num = v => v ? yen(v) : '';
     const work = [['出勤日数', x.days ? `${yen(x.days)}日` : ''], ['労働時間', x.hours ? `${yen(x.hours)}時間` : ''], ['残業時間', x.otHours ? `${yen(x.otHours)}時間` : '']];
-    const pays = [[c.type === 'monthly' ? '基本給' : `${P().TYPES[c.type]}分`, num(c.basePay)], ['残業手当', num(c.ot)], ...(e.allowances || []).map(a => [a.name, num(n0(a.amount))]),
+    const pays = [[['monthly', 'manual'].includes(c.type) ? '基本給' : `${P().TYPES[c.type]}分`, num(c.basePay)], ['残業手当', num(c.ot)], ...(e.allowances || []).map(a => [a.name, num(n0(a.amount))]),
       ...(c.extraPay ? [['その他の支給', yen(c.extraPay)]] : []), ['通勤手当（非課税）', num(c.commute)], ['総支給額', yen(c.gross), 'sum']];
     const social = c.health + c.care + c.kids + c.pension + c.emp;
     const deds = [['健康保険', num(c.health)], ['介護保険', num(c.care)], ...(c.kids ? [['子ども・子育て支援金', yen(c.kids)]] : []), ['厚生年金', num(c.pension)], ['雇用保険', num(c.emp)], ['社会保険計', num(social), 'sub'],

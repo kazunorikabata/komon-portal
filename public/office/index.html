@@ -532,7 +532,7 @@ html, body { margin: 0; }
     for (const e of CLIENT.employees) {
       const x = pd.rows[e.id]; if (!x) continue;
       const c = Payroll.calc(e, x, P.rates, P.tax, { month: THIS, lag: P.lag ?? 1 });
-      add((c.type === 'monthly') ? 'salary' : 'wage', c.taxable);
+      add(Payroll.isFixedMonthly(e) ? 'salary' : 'wage', c.taxable);
       for (const k of ['commute', 'health', 'care', 'kids', 'pension', 'emp', 'itax', 'rtax', 'extraDed']) add(k, c[k]);
       for (const a of e.deductions || []) named[a.name || 'その他の控除'] = (named[a.name || 'その他の控除'] || 0) + (Number(a.amount) || 0);
     }

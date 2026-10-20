@@ -87,7 +87,10 @@
     return Math.max(0, tax - 1610 * n(subDeps));
   }
 
-  const TYPES = { monthly: '月給', hourly: '時給', daily: '日給' };
+  // manual：毎月、支給額をその月の給与の画面で入れる（歩合など）
+  const TYPES = { monthly: '月給', hourly: '時給', daily: '日給', manual: '毎月入力' };
+  // 月給と同じく、その月の給与を作ると表に入る形
+  const isFixedMonthly = e => ['monthly', 'manual'].includes(e.type || 'monthly');
 
   // 標準報酬月額の等級表（健康保険 1〜50等級。厚生年金は 88,000円〜650,000円の 1〜32等級）。[標準報酬月額, 報酬月額の下限（以上）]
   const STD_TABLE = [[58000, 0], [68000, 63000], [78000, 73000], [88000, 83000], [98000, 93000], [104000, 101000], [110000, 107000], [118000, 114000], [126000, 122000], [134000, 130000], [142000, 138000], [150000, 146000], [160000, 155000], [170000, 165000], [180000, 175000], [190000, 185000], [200000, 195000], [220000, 210000], [240000, 230000], [260000, 250000], [280000, 270000], [300000, 290000], [320000, 310000], [340000, 330000], [360000, 350000], [380000, 370000], [410000, 395000], [440000, 425000], [470000, 455000], [500000, 485000], [530000, 515000], [560000, 545000], [590000, 575000], [620000, 605000], [650000, 635000], [680000, 665000], [710000, 695000], [750000, 730000], [790000, 770000], [830000, 810000], [880000, 855000], [930000, 905000], [980000, 955000], [1030000, 1005000], [1090000, 1055000], [1150000, 1115000], [1210000, 1175000], [1270000, 1235000], [1330000, 1295000], [1390000, 1355000]];
@@ -158,7 +161,7 @@
     x = x || {}; R = { ...DEFAULT_RATES, ...R };
     const ov = x.ov || {}, pick = (k, v) => ov[k] !== undefined && ov[k] !== '' ? n(ov[k]) : v;
     const type = e.type || 'monthly';
-    const basePay = pick('basePay', type === 'hourly' ? Math.round(n(e.base) * n(x.hours)) : type === 'daily' ? Math.round(n(e.base) * n(x.days)) : n(e.base));
+    const basePay = pick('basePay', type === 'hourly' ? Math.round(n(e.base) * n(x.hours)) : type === 'daily' ? Math.round(n(e.base) * n(x.days)) : type === 'manual' ? n(x.amount) : n(e.base));
     const ot = pick('ot', Math.round(n(e.otRate) * n(x.otHours)));
     const allow = sum(e.allowances);
     const extraPay = n(x.extraPay);
@@ -209,7 +212,7 @@
     const active = (employees || []).filter(e => e.active !== false && (!e.left || e.left.slice(0, 7) >= m) && (!e.joined || e.joined.slice(0, 7) <= m));
     const gross = (e, mm) => { const x = rowOf(mm, e.id); return x ? calc(e, x, R, cfg.tax, { month: mm, lag }).gross : null; };
     // 支払基礎日数：日数を入れていない月給の人は17日以上とみなす
-    const enoughDays = (e, mm) => { const x = rowOf(mm, e.id); return x && ((e.type || 'monthly') === 'monthly' && !x.days ? true : n(x.days) >= 17); };
+    const enoughDays = (e, mm) => { const x = rowOf(mm, e.id); return x && (isFixedMonthly(e) && !x.days ? true : n(x.days) >= 17); };
 
     // 料率：健康保険・介護・子ども・子育て支援金は3月分の保険料から、雇用保険は4月から変わる
     const ry = n(cfg.ratesYear);
@@ -270,5 +273,5 @@
   }
   const snapshotOf = c => Object.fromEntries(SNAPSHOT_KEYS.filter(k => c[k] !== undefined).map(k => [k, JSON.parse(JSON.stringify(c[k]))]));
 
-  window.Payroll = { withholdOtsu, settings, snapshotOf, SHARED_KEYS, alerts, fixedKey, rtaxFor, rtaxYear, period, payDate, ruleText, STD_GRADES, gradeFor, calc, withholdKou, r50, ageFlags, ageAt, TYPES, DEFAULT_RATES, DEFAULT_TAX };
+  window.Payroll = { isFixedMonthly, withholdOtsu, settings, snapshotOf, SHARED_KEYS, alerts, fixedKey, rtaxFor, rtaxYear, period, payDate, ruleText, STD_GRADES, gradeFor, calc, withholdKou, r50, ageFlags, ageAt, TYPES, DEFAULT_RATES, DEFAULT_TAX };
 })();
