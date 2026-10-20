@@ -230,6 +230,10 @@ td.partner { min-width: 7em; }
 #payBox table.pay input { padding: 5px 6px; font-size: 14px; width: 5.2em; }
 #payBox table.pay td:last-child { white-space: nowrap; }
 #payBox table.pay th { white-space: normal; line-height: 1.3; }
+#payBox .alerts { border: 1px solid var(--warn-fg); border-radius: 4px; padding: 10px 14px; background: var(--sheet); }
+#payBox .alerts h3 { margin: 0 0 6px; font-size: 14px; color: var(--warn-fg); }
+#payBox .alerts ul { margin: 0; padding-left: 1.2em; display: grid; gap: 4px; font-size: 13px; }
+#payBox .alerts li.warn { color: var(--out); font-weight: 500; }
 #payBox .warn { background: var(--warn-bg); color: var(--warn-fg); padding: 8px 12px; border-radius: 4px; font-size: 13px; margin: 0; }
 .emp-form .pairs { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 8px; }
 .confirm { display: flex; gap: 6px; align-items: center; white-space: nowrap; font-size: 13px; }
@@ -988,9 +992,10 @@ tfoot td { font-weight: bold; }
     const R = payCfg().rates || {};
     const pd = state.pay[m] || {};
     const emps = empsOf(m);
+    const notes = payAlertsHtml(m);
     // まだその月の給与を作っていない：月給の人を入れて始める
     if (!state.pay[m]) {
-      box.innerHTML = `<div class="entry"><h3>${monthName(m)}支給の給与はまだ作っていません</h3>
+      box.innerHTML = `${notes}<div class="entry"><h3>${monthName(m)}支給の給与はまだ作っていません</h3>
         <p style="margin:0">支給日 ${P().payDate(m, payCfg()).replace(/-/g, '/')}、計算期間 ${defPeriod(m)}（${P().ruleText(payCfg())}）です。「この月の給与を作る」を押すと、月給の人が入った表ができます。時給・日給の人は、表に時間や日数を入れると入ります。</p>
         <div style="display:flex;flex-wrap:wrap;gap:8px">${lock ? '' : `<button type="button" class="btn" id="payStart"${emps.length ? '' : ' disabled'}>この月の給与を作る</button>`}
           <button type="button" class="btn ghost" id="empOpen">従業員の登録・変更</button>
@@ -1003,7 +1008,7 @@ tfoot td { font-weight: bold; }
     if (emps.some(e => e.shaho) && !(n0(R.health) && n0(R.pension))) warn.push('社会保険料の料率が事務所でまだ設定されていません。');
     if (emps.some(e => e.koyo) && !n0(R.emp)) warn.push('雇用保険料の料率が事務所でまだ設定されていません。');
     const inp = (e, k, v, attrs = '') => `<input type="text" inputmode="decimal" id="py-${e.id}-${k}" data-emp="${e.id}" data-k="${k}" value="${v ?? ''}" aria-label="${esc(e.name)} ${k}"${dis}${attrs}>`;
-    let h = `${warn.map(w => `<p class="warn">${w}</p>`).join('')}
+    let h = `${notes}${warn.map(w => `<p class="warn">${w}</p>`).join('')}
       <div class="fields">
         <label class="f" for="py-date">支給日<input type="date" id="py-date" value="${pd.date || ''}"${dis}></label>
         <label class="f wide" for="py-period">賃金の計算期間（${esc(P().ruleText(payCfg()))}）<input type="text" id="py-period" value="${esc(pd.period || defPeriod(m))}"${dis}></label>
@@ -1035,6 +1040,13 @@ tfoot td { font-weight: bold; }
       </div>`;
     box.innerHTML = h;
     updatePayCalc();
+  }
+
+  // 料率の変更・随時改定・定時決定・住民税・年齢のお知らせ
+  function payAlertsHtml(m) {
+    const list = P().alerts({ month: m, employees: state.employees || [], rowOf: payRow, cfg: payCfg() });
+    if (!list.length) return '';
+    return `<div class="alerts" role="status"><h3>お知らせ（${list.length}件）</h3><ul>${list.map(a => `<li class="${a.level}">${esc(a.text)}</li>`).join('')}</ul></div>`;
   }
 
   // 計算結果の欄だけを書き直す（入力中の欄はそのまま）
@@ -1144,6 +1156,7 @@ tfoot td { font-weight: bold; }
           </div></div>
         <div class="sr-sec"><h4>毎月決まった控除（食事代など）</h4>${[0, 1].map(i => pair('deductions', i, '控除')).join('')}</div>
         <label class="check" for="ef-active"><input type="checkbox" id="ef-active"${e.active === false ? ' checked' : ''}>この人はもう使わない（一覧に出さない）</label>
+        <p style="margin:0;font-size:12px;color:var(--ink-soft)">基本給・時給・手当・通勤手当を変えると、${monthName(view.month)}支給から変わったものとして、随時改定（月額変更）に当たるかを3か月後に知らせます。変わる月の給与の画面で直してください。</p>
         <div class="form-foot"><span class="msg" id="efMsg" role="status"></span>
           <div style="display:flex;gap:8px"><button type="button" class="btn ghost" id="empCancel">やめる</button><button type="submit" class="btn">保存する</button></div></div>
       </form>`;
@@ -1183,6 +1196,16 @@ tfoot td { font-weight: bold; }
     if (!emp.base) return fail(`${{ monthly: '基本給', hourly: '時給', daily: '日給' }[emp.type]}を入力してください。`);
     if (emp.shaho && !emp.std) return fail('社会保険に加入している人は、標準報酬月額を入力してください。');
     const list = state.employees ||= [], i = list.findIndex(x => x.id === emp.id);
+    // 固定的賃金（給与の形・基本給や単価・手当・通勤手当）が変わったら、随時改定の判定のために記録する
+    if (i >= 0 && P().fixedKey(list[i]) !== P().fixedKey(emp)) {
+      const o = list[i], parts = [];
+      const sumA = a => (a || []).reduce((t, x) => t + n0(x.amount), 0);
+      if ((o.type || 'monthly') !== (emp.type || 'monthly')) parts.push(`${P().TYPES[o.type || 'monthly']}→${P().TYPES[emp.type || 'monthly']}`);
+      if (n0(o.base) !== n0(emp.base)) parts.push(`${{ monthly: '基本給', hourly: '時給', daily: '日給' }[emp.type || 'monthly']} ${yen(o.base)}円→${yen(emp.base)}円`);
+      if (sumA(o.allowances) !== sumA(emp.allowances)) parts.push(`手当 ${yen(sumA(o.allowances))}円→${yen(sumA(emp.allowances))}円`);
+      if (n0(o.commute) !== n0(emp.commute) || (o.commuteType || 'month') !== (emp.commuteType || 'month')) parts.push(`通勤手当 ${yen(o.commute)}円→${yen(emp.commute)}円`);
+      emp.fixedChanges = [...(o.fixedChanges || []).filter(c => c.month !== view.month), { month: view.month, what: parts.join('、') }];
+    }
     const clean = Object.fromEntries(Object.entries(emp).filter(([, v]) => v !== undefined && v !== ''));
     if (i >= 0) list[i] = clean; else list.push(clean);
     view.empEdit = 'list'; save(); renderPay(); renderStatus();
@@ -1279,28 +1302,28 @@ tfoot td { font-weight: bold; }
     const html = `<!doctype html><html lang="ja"><head><meta charset="utf-8"><title>給与明細 ${monthName(m)}</title><style>
 @page { size: A4 portrait; margin: 0; }
 * { box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; } html, body { margin: 0; background: #e9e9e9; }
-body { font-family: "Hiragino Sans", "Yu Gothic", "Meiryo", sans-serif; color: #1d2733; font-size: 9pt; }
+body { font-family: "Hiragino Sans", "Yu Gothic", "Meiryo", sans-serif; color: #000; font-size: 9pt; }
 .bar { background: #eef3f0; padding: 8px 12px; display: flex; gap: 12px; justify-content: center; align-items: center; }
 .page { width: 210mm; height: 297mm; margin: 8mm auto; padding: 10mm 11mm; background: #fff; display: grid; grid-template-rows: 1fr 1fr; gap: 0; box-shadow: 0 1px 6px rgba(0,0,0,.2); page-break-after: always; }
 @media print { html, body { background: #fff; } .bar { display: none; } .page { margin: 0; box-shadow: none; } }
 .slip { padding: 4mm 0 6mm; display: grid; gap: 3mm; align-content: start; }
 .slip + .slip { border-top: 1px dashed #999; padding-top: 8mm; }
-.top { display: grid; grid-template-columns: 1fr auto 1fr; align-items: end; gap: 4mm; border-bottom: 2px solid #1f5c4a; padding-bottom: 2mm; }
+.top { display: grid; grid-template-columns: 1fr auto 1fr; align-items: end; gap: 4mm; border-bottom: 2px solid #000; padding-bottom: 2mm; }
 .co { font-size: 10.5pt; font-weight: bold; } .meta { font-size: 8pt; color: #555; margin-top: 1mm; }
-h2 { margin: 0; font-size: 16pt; letter-spacing: .3em; text-align: center; color: #1f5c4a; }
+h2 { margin: 0; font-size: 16pt; letter-spacing: .3em; text-align: center; color: #000; }
 h2 small { display: block; font-size: 8.5pt; letter-spacing: .05em; color: #555; font-weight: normal; margin-top: 1mm; }
-.who { text-align: right; font-size: 9pt; } .who span { font-size: 13pt; font-weight: bold; border-bottom: 1px solid #1d2733; padding: 0 3mm; }
+.who { text-align: right; font-size: 9pt; } .who span { font-size: 13pt; font-weight: bold; border-bottom: 1px solid #000; padding: 0 3mm; }
 table.grid { width: 100%; border-collapse: collapse; table-layout: fixed; }
 col.labc { width: 8mm; }
-.grid th, .grid td { border: .6pt solid #8a96a3; height: 6.2mm; padding: .6mm 1.4mm; }
-.grid th { font-weight: normal; font-size: 7.5pt; color: #3b4a5c; text-align: center; white-space: nowrap; overflow: hidden; }
+.grid th, .grid td { border: .6pt solid #555; height: 6.2mm; padding: .6mm 1.4mm; }
+.grid th { font-weight: normal; font-size: 7.5pt; color: #222; text-align: center; white-space: nowrap; overflow: hidden; }
 .grid td { text-align: right; font-family: "Courier New", ui-monospace, monospace; font-size: 10pt; }
 .grid th.lab { color: #fff; font-size: 9.5pt; font-weight: bold; line-height: 1.25; letter-spacing: .1em; }
-.lab.w { background: #6b7a8c; } .lab.p { background: #1f5c4a; } .lab.d { background: #a33a2f; } .lab.t { background: #1d2733; }
-tr.h.w th:not(.lab) { background: #eef1f4; } tr.h.p th:not(.lab) { background: #e4efe9; } tr.h.d th:not(.lab) { background: #f8e7e4; } tr.h.t th:not(.lab) { background: #e9edf2; }
+.grid th.lab { background: #333; }
+tr.h th:not(.lab) { background: #ededed; }
 .grid th.sum, .grid th.sub { font-weight: bold; } .grid td.sum { font-weight: bold; } .grid td.sub { color: #555; }
-.grid th.net { background: #1f5c4a !important; color: #fff; font-weight: bold; font-size: 8.5pt; }
-.grid td.net { font-weight: bold; font-size: 12.5pt; color: #1f5c4a; border: 1.4pt solid #1f5c4a; }
+.grid th.net { background: #000 !important; color: #fff; font-weight: bold; font-size: 8.5pt; }
+.grid td.net { font-weight: bold; font-size: 12.5pt; color: #000; border: 1.6pt solid #000; }
 .note { margin: 0; font-size: 7.5pt; color: #777; }
 </style></head><body><div class="bar"><button onclick="window.print()">印刷する</button><span>A4縦に2人分ずつ印刷します。</span></div>
 ${Array.from({ length: Math.ceil(emps.length / 2) }, (_, i) => `<div class="page">${emps.slice(i * 2, i * 2 + 2).map(e => slipHtml(m, e)).join('')}</div>`).join('')}

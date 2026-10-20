@@ -146,5 +146,70 @@
     return { age, premMonth: pm, type, basePay, ot, allow, extraPay, commute, taxable, gross, health, care, kids, pension, emp, shaho, col, autoTax, itax, rtax, fixedDed, extraDed, otherDed, net };
   }
 
-  window.Payroll = { rtaxFor, rtaxYear, period, payDate, ruleText, STD_GRADES, gradeFor, calc, withholdKou, r50, ageFlags, ageAt, TYPES, DEFAULT_RATES, DEFAULT_TAX };
+  /* 月の給与を計算するときのお知らせ（料率の変更・随時改定・定時決定・住民税の切り替え・年齢） */
+
+  // 固定的賃金（変わると随時改定の判定が始まる）
+  const fixedKey = e => JSON.stringify([e.type || 'monthly', n(e.base), sum(e.allowances), e.commuteType || 'month', n(e.commute)]);
+  const ymText = m => `${Number(m.slice(0, 4))}年${Number(m.slice(5))}月`;
+  const gradeOf = std => STD_GRADES.find(g => g.std === n(std)) || gradeFor(n(std));
+
+  // ctx：{ month 支給の月, employees, rowOf(月, 従業員ID) その月の入力（払わない月は undefined）, cfg 給与の設定 }
+  function alerts(ctx) {
+    const { month: m, employees, rowOf, cfg } = ctx;
+    const out = [], R = cfg.rates || {}, lag = n(cfg.lag ?? 1);
+    const pm = shiftYM(m, -lag), [py, pmo] = pm.split('-').map(Number), [my, mmo] = m.split('-').map(Number);
+    const active = (employees || []).filter(e => e.active !== false && (!e.left || e.left.slice(0, 7) >= m) && (!e.joined || e.joined.slice(0, 7) <= m));
+    const gross = (e, mm) => { const x = rowOf(mm, e.id); return x ? calc(e, x, R, cfg.tax, { month: mm, lag }).gross : null; };
+    // 支払基礎日数：日数を入れていない月給の人は17日以上とみなす
+    const enoughDays = (e, mm) => { const x = rowOf(mm, e.id); return x && ((e.type || 'monthly') === 'monthly' && !x.days ? true : n(x.days) >= 17); };
+
+    // 料率：健康保険・介護・子ども・子育て支援金は3月分の保険料から、雇用保険は4月から変わる
+    const ry = n(cfg.ratesYear);
+    const healthFY = pmo >= 3 ? py : py - 1, empFY = mmo >= 4 ? my : my - 1;
+    if (active.some(e => e.shaho) && ry < healthFY) out.push({ level: 'warn', text: `健康保険・介護保険・子ども・子育て支援金の料率は、毎年3月分の保険料から変わります。この月の保険料（${ymText(pm)}分）は${healthFY}年度の料率です。事務所の設定の「料率の年度」が${ry ? `${ry}年度` : '未設定'}です。${healthFY}年度の料率に直して、「料率の年度」も直してください。` });
+    if (active.some(e => e.koyo) && ry < empFY) out.push({ level: 'warn', text: `雇用保険料率は、毎年4月から変わることがあります。${empFY}年度の料率になっているか確かめてください（事務所の設定の「料率の年度」が${ry ? `${ry}年度` : '未設定'}です）。` });
+
+    for (const e of active) {
+      const who = `${e.name}さん`;
+      // 年齢：介護・厚生年金・健康保険が変わる月
+      const f = ageFlags(e.birth, pm), f0 = ageFlags(e.birth, shiftYM(pm, -1));
+      if (e.shaho && f && f0) {
+        if (f.care && !f0.care) out.push({ level: 'info', text: `${who}：40歳になったので、${ymText(pm)}分の保険料から介護保険料がかかります。` });
+        if (!f.care && f0.care && f.health) out.push({ level: 'info', text: `${who}：65歳になったので、${ymText(pm)}分の保険料から介護保険料がかかりません（介護保険料は市区町村に納めます）。` });
+        if (!f.pension && f0.pension) out.push({ level: 'info', text: `${who}：70歳になったので、${ymText(pm)}分から厚生年金の保険料がかかりません（70歳以上被用者の届出が必要です）。` });
+        if (!f.health && f0.health) out.push({ level: 'warn', text: `${who}：75歳になったので、${ymText(pm)}分から健康保険（後期高齢者医療に移ります）の保険料がかかりません。資格喪失届が必要です。` });
+      }
+      // 住民税：6月から新しい年度の額になる
+      if ((mmo === 5 || mmo === 6) && (e.rtaxYears || e.rtax)) {
+        const fy = String(my);
+        if (!e.rtaxYears?.[fy]) out.push({ level: mmo === 6 ? 'warn' : 'info', text: `${who}：${fy}年度の住民税（6月支給の給与から）がまだ入っていません。決定通知書が届いたら「住民税の入力」で入れてください。` });
+      }
+      if (!e.shaho) continue;
+      const cur = gradeOf(e.std);
+      // 随時改定：固定的賃金が変わった月から3か月の平均で、2等級以上の差があれば4か月目から変える
+      const ch = (e.fixedChanges || []).filter(c => c.month <= m && shiftYM(c.month, 4) >= m).pop();
+      if (ch) {
+        const ms = [0, 1, 2].map(k => shiftYM(ch.month, k));
+        const done = ms.every(mm => mm <= m && rowOf(mm, e.id));
+        if (!done) out.push({ level: 'info', text: `${who}：${ymText(ch.month)}支給から固定的賃金が変わりました（${ch.what}）。${ymText(ms[2])}支給までの3か月の給与で、随時改定（月額変更）に当たるか判定します。` });
+        else if (ms.every(mm => enoughDays(e, mm))) {
+          const avg = Math.floor(ms.reduce((t, mm) => t + gross(e, mm), 0) / 3), g = gradeFor(avg);
+          const from = shiftYM(ch.month, 3);
+          if (Math.abs(g.health - cur.health) >= 2 && g.std !== n(e.std)) out.push({ level: 'warn', text: `${who}：随時改定に当たります。${ymText(ms[0])}〜${ymText(ms[2])}支給の平均 ${avg.toLocaleString('ja-JP')}円 → 健保${g.health}等級 ${g.std.toLocaleString('ja-JP')}円（今は${cur.health}等級 ${cur.std.toLocaleString('ja-JP')}円）。月額変更届を出して、${ymText(from)}分の保険料（${lag ? `${ymText(shiftYM(from, 1))}支給` : `${ymText(from)}支給`}の給与）から標準報酬月額を変えてください。` });
+          else if (shiftYM(ch.month, 2) === m) out.push({ level: 'info', text: `${who}：3か月の平均 ${avg.toLocaleString('ja-JP')}円は健保${g.health}等級で、今の${cur.health}等級と2等級以上の差がないので、随時改定には当たりません。` });
+        }
+      }
+      // 定時決定：4〜6月支給の平均（支払基礎日数17日以上の月）で、9月分から
+      if (mmo >= 7 && mmo <= 9) {
+        const ms = [4, 5, 6].map(k => `${my}-${String(k).padStart(2, '0')}`).filter(mm => rowOf(mm, e.id) && enoughDays(e, mm));
+        if (ms.length) {
+          const avg = Math.floor(ms.reduce((t, mm) => t + gross(e, mm), 0) / ms.length), g = gradeFor(avg);
+          if (g.std !== n(e.std)) out.push({ level: mmo === 7 ? 'info' : 'warn', text: `${who}：算定基礎届（定時決定）。${ms.map(mm => Number(mm.slice(5)) + '月').join('・')}支給の平均 ${avg.toLocaleString('ja-JP')}円 → 健保${g.health}等級 ${g.std.toLocaleString('ja-JP')}円（今は ${cur.std.toLocaleString('ja-JP')}円）。決定通知が届いたら、${my}年9月分の保険料から標準報酬月額を変えてください。` });
+        }
+      }
+    }
+    return out;
+  }
+
+  window.Payroll = { alerts, fixedKey, rtaxFor, rtaxYear, period, payDate, ruleText, STD_GRADES, gradeFor, calc, withholdKou, r50, ageFlags, ageAt, TYPES, DEFAULT_RATES, DEFAULT_TAX };
 })();

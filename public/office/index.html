@@ -195,6 +195,7 @@ html, body { margin: 0; }
 
   <nav class="tabs" role="tablist" id="tabs"></nav>
 
+  <div id="payAlerts" hidden></div>
   <p class="hint">赤い行は科目が未設定です。科目を選ぶと、同じ内容の取引には次回から自動で同じ科目が入ります。税区分は顧問先が入力した税率から自動で入ります。必要なら直してください。</p>
   <div class="table-box"><table id="journal"></table></div>
 
@@ -733,6 +734,10 @@ html, body { margin: 0; }
         <td class="src">${esc(j.src)}${j.noInv && j.tax !== '0' ? '<div class="noinv">インボイスなし</div>' : ''}</td></tr>`;
     }
     $('journal').innerHTML = h + '</tbody>';
+    // 給与のお知らせ（顧問先のページと同じもの）
+    const al = book === 'pay' ? Payroll.alerts({ month: THIS, employees: CLIENT.employees, rowOf: (mm, id) => docs['m:' + mm]?.data?.pay?.rows?.[id], cfg: CFG.payroll || {} }) : [];
+    $('payAlerts').hidden = !al.length;
+    $('payAlerts').innerHTML = al.length ? `<div class="panel" style="border-color:var(--warn-fg)"><h3>給与のお知らせ（${al.length}件）</h3><ul style="margin:0;padding-left:1.2em;display:grid;gap:4px;font-size:13px">${al.map(a => `<li style="${a.level === 'warn' ? 'color:var(--bad);font-weight:500' : ''}">${esc(a.text)}</li>`).join('')}</ul></div>` : '';
     renderAccts(); renderExport();
   }
 
@@ -1096,8 +1101,9 @@ html, body { margin: 0; }
         <label class="f" for="pf-lag">社会保険料の引き方<select id="pf-lag" data-pf="lag"><option value="1"${(p.lag ?? 1) == 1 ? ' selected' : ''}>翌月徴収（前月分を引く）</option><option value="0"${p.lag == 0 ? ' selected' : ''}>当月徴収（その月の分を引く）</option></select></label>
         <label class="f" for="pf-acctPay">未払の科目（給与の相手科目）<select id="pf-acctPay" data-pf="acctPay">${acctOptions(p.acctPay || '318')}</select></label>
       </div>
-      <p class="hint">料率は年度や都道府県で変わります。協会けんぽ・年金機構・厚労省の今年度の料率を入れてください（労使合計の料率。従業員の負担はその半分で計算します）。</p>
+      <p class="hint">料率を今年度のものに直したら「料率の年度」も直してください。年度が古いままだと、3月分（健康保険など）・4月（雇用保険）から、給与の画面にお知らせが出ます。料率は年度や都道府県で変わります。協会けんぽ・年金機構・厚労省の今年度の料率を入れてください（労使合計の料率。従業員の負担はその半分で計算します）。</p>
       <div class="fields">
+        ${num('ratesYear', '料率の年度（例：2026）', p.ratesYear, String(new Date().getFullYear()))}
         ${num('rates.health', '健康保険料率（％）', r.health, '例：9.85')}
         ${num('rates.care', '介護保険料率（％）', r.care, '例：1.59')}
         ${num('rates.kids', '子ども・子育て支援金率（％）', r.kids, '令和8年度から')}
