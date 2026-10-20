@@ -134,6 +134,15 @@ html, body { margin: 0; }
 .admin table { min-width: 0; font-size: 14px; }
 .pill.req { background: var(--warn-bg); color: var(--warn-fg); }
 .pill.none { background: transparent; color: var(--ink-soft); border: 1px dashed var(--rule); }
+#overview table { min-width: 0; font-size: 13px; }
+#overview td { vertical-align: top; padding: 8px 10px; }
+#overview .books { display: flex; flex-wrap: wrap; gap: 6px; }
+#overview .pill { font-size: 12px; padding: 2px 10px; cursor: pointer; border: 1px solid transparent; font-family: inherit; }
+#overview .pill.new { background: var(--bad); color: #fff; }
+#overview .pill.new::before { content: "新着 "; font-weight: 700; }
+#overview tr.has-new td:first-child { font-weight: 700; }
+#overview .head { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: baseline; justify-content: space-between; }
+#overview .newcount { color: var(--bad); font-weight: 700; }
 .link-btn { background: none; border: 0; padding: 2px 4px; cursor: pointer; font: inherit; font-size: 13px; color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
 .link-btn.danger { color: var(--bad); }
 .cfg-book { border: 1px solid var(--rule); border-radius: 4px; padding: 12px 14px; display: grid; gap: 10px; margin: 0; min-width: 0; }
@@ -160,6 +169,11 @@ html, body { margin: 0; }
       <span class="pill" id="submitted"></span>
     </div>
   </header>
+
+  <section class="panel" id="overview">
+    <div class="head"><h2 id="ovTitle">提出の状況</h2><span class="hint" id="ovNote"></span></div>
+    <div class="table-box"><table id="ovTable"></table></div>
+  </section>
 
   <section class="admin" style="display:grid;gap:10px">
     <details id="reqBox"><summary id="reqSummary">修正依頼</summary><div id="reqList"></div></details>
@@ -734,6 +748,7 @@ html, body { margin: 0; }
         <td class="src">${esc(j.src)}${j.noInv && j.tax !== '0' ? '<div class="noinv">インボイスなし</div>' : ''}</td></tr>`;
     }
     $('journal').innerHTML = h + '</tbody>';
+    markSeen();
     // 給与のお知らせ（顧問先のページと同じもの）
     const al = book === 'pay' ? Payroll.alerts({ month: THIS, employees: CLIENT.employees, rowOf: (mm, id) => docs['m:' + mm]?.data?.pay?.rows?.[id], cfg: Payroll.settings(CFG.payroll, docs.master?.data?.paySettings) }) : [];
     $('payAlerts').hidden = !al.length;
@@ -1253,6 +1268,76 @@ html, body { margin: 0; }
     render(); renderCfg();
   }
 
+  /* ---------- 提出の状況（すべての顧問先・直近3か月） ---------- */
+
+  let overview = null;
+  const OV_MONTHS = () => [2, 1, 0].map(k => shiftYM(`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`, -k));
+  // 顧問先の帳簿（ひな形ごと）
+  function booksOf(c) {
+    if (c.template === 'std') {
+      const cfg = overview?.configs?.[c.id];
+      const list = (cfg?.cashbooks?.length ? cfg.cashbooks : [{ id: 'main', name: '現金出納帳' }]).map(b => ['cb:' + b.id, b.name]);
+      if (cfg?.payroll) list.push(['pay', cfg.payroll.name]);
+      return list;
+    }
+    return Object.entries(PETERS_BOOKS);
+  }
+  // 見たかどうか：提出の日付と、承認した修正依頼の数が同じなら、見たものとする（再提出は新着になる）
+  const seenKey = (cid, m, b) => `${cid}|${m}|${b}`;
+  const readSeen = () => { try { return JSON.parse(localStorage.getItem('office-seen') || 'null'); } catch (e) { return null; } };
+  const writeSeen = v => { try { localStorage.setItem('office-seen', JSON.stringify(v)); } catch (e) {} };
+  function statusOf(c, m, b) {
+    const d = overview.months.find(x => x.client === c.id && x.month === m);
+    const sub = subMap(d?.submitted)[b];
+    const reqs = (d?.requests || []).filter(q => !q.book || q.book === b);
+    const token = sub ? `${sub}|${reqs.filter(q => q.status === 'approved').length}` : '';
+    return { sub, pending: reqs.some(q => q.status === 'pending'), token };
+  }
+  function renderOverview() {
+    if (!overview) return;
+    const months = OV_MONTHS();
+    let seen = readSeen();
+    // はじめて開いたときは、今ある提出を「見た」ことにする（全部が新着にならないように）
+    if (!seen) { seen = {}; for (const c of clients) for (const m of months) for (const [b] of booksOf(c)) { const st = statusOf(c, m, b); if (st.sub) seen[seenKey(c.id, m, b)] = st.token; } writeSeen(seen); }
+    let newCount = 0;
+    const rowsHtml = clients.map(c => {
+      let rowNew = false;
+      const cells = months.map(m => `<td><div class="books">${booksOf(c).map(([b, name]) => {
+        const st = statusOf(c, m, b), isNew = st.sub && seen[seenKey(c.id, m, b)] !== st.token;
+        if (isNew) { newCount++; rowNew = true; }
+        const cls = st.pending ? 'req' : isNew ? 'new' : st.sub ? '' : 'none';
+        const label = st.pending ? `${name}：修正依頼` : st.sub ? `${name}：提出 ${st.sub}` : `${name}：未提出`;
+        return `<button type="button" class="pill ${cls}" data-ov="${c.id}" data-m="${m}" data-b="${esc(b)}" title="${esc(c.name)} ${Number(m.slice(5))}月分を開く">${esc(label)}</button>`;
+      }).join('')}</div></td>`).join('');
+      return `<tr class="${rowNew ? 'has-new' : ''}"><td>${esc(c.name)}</td>${cells}</tr>`;
+    }).join('');
+    $('ovTable').innerHTML = `<thead><tr><th>顧問先</th>${months.map(m => `<th>${Number(m.slice(0, 4))}年${Number(m.slice(5))}月分</th>`).join('')}</tr></thead><tbody>${rowsHtml || `<tr><td colspan="4" class="hint">まだ顧問先がありません</td></tr>`}</tbody>`;
+    $('ovTitle').innerHTML = `提出の状況${newCount ? `　<span class="newcount">新しい提出が ${newCount} 件あります</span>` : ''}`;
+    $('ovNote').textContent = `${new Date(overview.at).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })} 現在。押すとその帳簿を開きます。`;
+    document.title = `${newCount ? `（${newCount}）` : ''}事務所用 仕訳変換`;
+  }
+  async function loadOverview() {
+    const r = await api(`/api/office/overview?months=${OV_MONTHS().join(',')}`);
+    overview = { ...r, at: Date.now() };
+    renderOverview();
+  }
+  // 開いた帳簿は「見た」ことにする
+  function markSeen() {
+    if (!current || !overview) return;
+    const st = statusOf(current, THIS, book);
+    if (!st.sub) return;
+    const seen = readSeen() || {};
+    if (seen[seenKey(current.id, THIS, book)] === st.token) return;
+    seen[seenKey(current.id, THIS, book)] = st.token; writeSeen(seen); renderOverview();
+  }
+  $('ovTable').addEventListener('click', async e => {
+    const t = e.target.closest('[data-ov]'); if (!t) return;
+    setMonth(t.dataset.m); book = t.dataset.b;
+    if (current?.id !== t.dataset.ov) await openClient(t.dataset.ov).catch(err => showReload(err.message));
+    else render();
+    $('main').scrollIntoView({ block: 'start' });
+  });
+
   // 顧問先が送ったデータを読み込み直す（科目の設定などを保存中のときは待つ）
   let lastLoaded = 0;
   async function refresh() {
@@ -1266,10 +1351,12 @@ html, body { margin: 0; }
     if (!cfgDirty) cfgDraft = null;
     render(); renderCfg();
   }
-  $('refreshBtn').addEventListener('click', () => refresh().catch(err => showReload(err.message)));
+  $('refreshBtn').addEventListener('click', () => Promise.all([refresh(), loadOverview()]).catch(err => showReload(err.message)));
+  // 開いたままでも、3分ごとに提出の状況を読み込み直す
+  setInterval(() => { if (document.visibilityState === 'visible') { loadOverview().catch(() => {}); if (Date.now() - lastLoaded > 170000) refresh().catch(() => {}); } }, 180000);
   // 別のタブから戻ってきたときは、1分以上たっていれば自動で読み込み直す
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible' && Date.now() - lastLoaded > 60000) refresh().catch(() => {});
+    if (document.visibilityState === 'visible' && Date.now() - lastLoaded > 60000) { refresh().catch(() => {}); loadOverview().catch(() => {}); }
   });
 
   $('clientSel').addEventListener('change', e => openClient(e.target.value).catch(err => showReload(err.message)));
@@ -1291,7 +1378,7 @@ html, body { margin: 0; }
     try {
       const res = await api(`/api/office/clients/${current.id}/doc/${key}`, { method: 'PUT', body: JSON.stringify({ data, version: doc.version }) });
       docs[key] = { data, version: res.version };
-      render();
+      render(); loadOverview().catch(() => {});
     } catch (err) { showReload(err.message); }
   });
 
@@ -1323,6 +1410,7 @@ html, body { margin: 0; }
   (async () => {
     try {
       await loadClients();
+      await loadOverview().catch(() => {});
       let last = ''; try { last = localStorage.getItem('office-client') || ''; } catch (e) {}
       if (clients.some(c => c.id === last)) await openClient(last); else render();
     } catch (err) { showReload(err.message || '読み込めませんでした。'); }

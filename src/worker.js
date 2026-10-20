@@ -240,6 +240,23 @@ async function officeApi(request, env, url, email) {
     return json({ id, name, subdomain: sub, template });
   }
 
+  // すべての顧問先の提出の状況（指定した月の提出・修正依頼と、標準のひな形の帳簿の名前）
+  if (path === '/api/office/overview' && method === 'GET') {
+    const months = String(url.searchParams.get('months') || '').split(',').filter(m => /^\d{4}-\d{2}$/.test(m)).slice(0, 12);
+    const keys = months.map(m => 'm:' + m);
+    const rows = keys.length ? (await env.DB.prepare(`SELECT client_id, key, json_extract(data, '$.submitted') AS submitted, json_extract(data, '$.requests') AS requests, updated_at
+      FROM docs WHERE key IN (${keys.map(() => '?').join(',')})`).bind(...keys).all()).results : [];
+    const cfgs = (await env.DB.prepare(`SELECT client_id, json_extract(data, '$.cashbooks') AS cashbooks, json_extract(data, '$.payroll') AS payroll FROM docs WHERE key = 'config'`).all()).results;
+    const parse = v => { try { return v ? JSON.parse(v) : null; } catch (e) { return null; } };
+    return json({
+      months: rows.map(r => ({ client: r.client_id, month: r.key.slice(2), submitted: parse(r.submitted), requests: (parse(r.requests) || []).map(q => ({ book: q.book, status: q.status })), updatedAt: r.updated_at })),
+      configs: Object.fromEntries(cfgs.map(r => {
+        const pr = parse(r.payroll);
+        return [r.client_id, { cashbooks: (parse(r.cashbooks) || []).map(b => ({ id: b.id, name: b.name })), payroll: pr?.enabled ? { name: pr.name || '給与' } : null }];
+      })),
+    });
+  }
+
   const cm = path.match(/^\/api\/office\/clients\/([0-9a-f-]{36})(\/.*)?$/);
   if (!cm) return fail(404, '見つかりません。');
   const clientId = cm[1], rest = cm[2] || '';
