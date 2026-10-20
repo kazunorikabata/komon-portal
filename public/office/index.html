@@ -1219,7 +1219,7 @@ html, body { margin: 0; }
     sel.innerHTML = '<option value="">顧問先を選ぶ</option>' + clients.map(c => `<option value="${c.id}"${current?.id === c.id ? ' selected' : ''}>${esc(c.name)}</option>`).join('');
     const host = location.hostname.split('.').slice(1).join('.');
     $('clientTable').innerHTML = `<thead><tr><th>顧問先</th><th>使う画面</th><th>ページのアドレス</th><th>ログインできるメールアドレス</th></tr></thead><tbody>${clients.map(c => `<tr>
-      <td>${esc(c.name)}</td><td>${esc(templates[c.template] || c.template)}</td><td><code>https://${esc(c.subdomain)}.${esc(host)}</code></td>
+      <td>${esc(c.name)}</td><td>${esc(templates[c.template] || c.template)}</td><td><a href="https://${esc(c.subdomain)}.${esc(host)}/" target="_blank" rel="noopener"><code>https://${esc(c.subdomain)}.${esc(host)}</code></a></td>
       <td>${c.emails.map(e => `<div>${esc(e)} <button type="button" class="link-btn danger" data-rmmail="${esc(e)}" data-client="${c.id}">外す</button></div>`).join('') || '<span class="hint">まだありません</span>'}</td></tr>`).join('') || '<tr><td colspan="4" class="hint">まだ顧問先がありません</td></tr>'}</tbody>`;
     // 修正依頼（選んでいる顧問先の、承認待ちの依頼）
     const pend = [];
