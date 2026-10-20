@@ -984,6 +984,7 @@ tfoot td { font-weight: bold; }
     const box = $('payBox'), m = view.month, lock = locked(), dis = lock ? ' disabled' : '';
     if (view.empEdit) { renderEmpForm(); return; }
     if (view.ledgerEmp) { renderLedger(); return; }
+    if (view.rtaxEdit) { renderRtax(); return; }
     const R = payCfg().rates || {};
     const pd = state.pay[m] || {};
     const emps = empsOf(m);
@@ -993,6 +994,7 @@ tfoot td { font-weight: bold; }
         <p style="margin:0">支給日 ${P().payDate(m, payCfg()).replace(/-/g, '/')}、計算期間 ${defPeriod(m)}（${P().ruleText(payCfg())}）です。「この月の給与を作る」を押すと、月給の人が入った表ができます。時給・日給の人は、表に時間や日数を入れると入ります。</p>
         <div style="display:flex;flex-wrap:wrap;gap:8px">${lock ? '' : `<button type="button" class="btn" id="payStart"${emps.length ? '' : ' disabled'}>この月の給与を作る</button>`}
           <button type="button" class="btn ghost" id="empOpen">従業員の登録・変更</button>
+          <button type="button" class="btn ghost" id="rtaxOpen"${(state.employees || []).length ? '' : ' disabled'}>住民税の入力</button>
           <button type="button" class="btn ghost" id="ledgerOpen"${(state.employees || []).length ? '' : ' disabled'}>賃金台帳</button></div>
         ${emps.length ? '' : '<p style="margin:0;color:var(--ink-soft);font-size:13px">先に「従業員の登録・変更」から従業員を登録してください。</p>'}</div>`;
       return;
@@ -1027,6 +1029,7 @@ tfoot td { font-weight: bold; }
       <p class="hint" style="margin:0;font-size:12px;color:var(--ink-soft)">数字を入れた人が、その月に給与を払う人になります。時給の人は労働時間、日給の人は出勤日数を入れてください。その他の支給・控除はマイナスも入れられます（欠勤控除など）。源泉所得税は甲欄の人は自動で計算します。乙欄・丙欄の人は税額表で調べて入れてください。</p>
       <div style="display:flex;flex-wrap:wrap;gap:8px">
         <button type="button" class="btn ghost" id="empOpen">従業員の登録・変更</button>
+        <button type="button" class="btn ghost" id="rtaxOpen">住民税の入力</button>
         <button type="button" class="btn ghost" id="slipAll">給与明細を印刷（全員）</button>
         <button type="button" class="btn ghost" id="ledgerOpen"${(state.employees || []).length ? '' : ' disabled'}>賃金台帳</button>
       </div>`;
@@ -1066,7 +1069,7 @@ tfoot td { font-weight: bold; }
   }
   let payTimer = null;
   $('payBox').addEventListener('input', e => {
-    if (locked() || view.empEdit || view.ledgerEmp) return;
+    if (locked() || view.empEdit || view.ledgerEmp || view.rtaxEdit) return;
     if (!e.target.closest('table.pay') && !['py-date', 'py-period'].includes(e.target.id)) return;
     readPayInput(e.target);
     if (reopened(view.month, 'pay')) view.payChanged = true;
@@ -1099,7 +1102,7 @@ tfoot td { font-weight: bold; }
       box.innerHTML = `<div class="ledger-head"><h2>従業員の登録・変更</h2><button type="button" class="btn ghost" id="empBack">給与の入力に戻る</button></div>
         <div class="table-box"><table><thead><tr><th>氏名</th><th>給与の形</th><th class="num">基本給・単価</th><th>社会保険</th><th>雇用保険</th><th>税区分</th><th class="num">住民税</th><th>状態</th><th></th></tr></thead><tbody>
         ${list.map(e => `<tr><td>${esc(e.name)}</td><td>${P().TYPES[e.type || 'monthly']}</td><td class="num">${yen(e.base)}</td><td>${e.shaho ? `加入（標準報酬 ${yen(e.std)}）${e.birth ? `・${ageNote(e, view.month)}` : e.care ? '・介護' : ''}` : '—'}</td><td>${e.koyo ? '加入' : '—'}</td>
-          <td>${esc(e.col || '甲')}${(e.col || '甲') === '甲' ? ` 扶養${n0(e.deps)}人` : ''}</td><td class="num">${yen(e.rtax)}</td><td>${e.active === false ? '使わない' : e.left ? `${esc(e.left)} 退職` : '在籍'}</td>
+          <td>${esc(e.col || '甲')}${(e.col || '甲') === '甲' ? ` 扶養${n0(e.deps)}人` : ''}</td><td class="num">${yen(P().rtaxFor(e, view.month))}</td><td>${e.active === false ? '使わない' : e.left ? `${esc(e.left)} 退職` : '在籍'}</td>
           <td><button type="button" class="link-btn" data-empedit="${e.id}">直す</button></td></tr>`).join('') || '<tr><td colspan="9" class="empty">まだ登録がありません。</td></tr>'}
         </tbody></table></div>
         ${locked() ? '' : '<div><button type="button" class="btn" id="empAdd">従業員を追加する</button></div>'}`;
@@ -1137,7 +1140,7 @@ tfoot td { font-weight: bold; }
           <div class="fields">
             <label class="f" for="ef-col">源泉所得税の区分<select id="ef-col">${[['甲', '甲欄（扶養控除等申告書を出している）'], ['乙', '乙欄（出していない）'], ['丙', '丙欄（日雇い）']].map(([k, l]) => `<option value="${k}"${(e.col || '甲') === k ? ' selected' : ''}>${l}</option>`).join('')}</select></label>
             <label class="f" for="ef-deps">扶養親族等の数（甲欄）<input type="number" id="ef-deps" min="0" value="${e.deps ?? 0}"></label>
-            <label class="f" for="ef-rtax">住民税（毎月の額・円）<input type="number" id="ef-rtax" value="${e.rtax ?? ''}"></label>
+            <p class="hint" style="margin:0;font-size:12px;color:var(--ink-soft);align-self:end">住民税は、給与の画面の「住民税の入力」で年度ごとに入れます。</p>
           </div></div>
         <div class="sr-sec"><h4>毎月決まった控除（食事代など）</h4>${[0, 1].map(i => pair('deductions', i, '控除')).join('')}</div>
         <label class="check" for="ef-active"><input type="checkbox" id="ef-active"${e.active === false ? ' checked' : ''}>この人はもう使わない（一覧に出さない）</label>
@@ -1160,7 +1163,7 @@ tfoot td { font-weight: bold; }
     const e = view.empDraft, v = id => $(id).value.trim(), num = id => optNum($(id).value);
     Object.assign(e, { birth: v('ef-birth') || undefined, name: v('ef-name'), sex: v('ef-sex') || undefined, type: v('ef-type'), base: num('ef-base'), otRate: num('ef-otRate'), joined: v('ef-joined') || undefined, left: v('ef-left') || undefined,
       commuteType: v('ef-commuteType'), commute: num('ef-commute'), shaho: $('ef-shaho').checked, std: num('ef-std'), care: $('ef-care').checked, koyo: $('ef-koyo').checked,
-      col: v('ef-col'), deps: num('ef-deps') || 0, rtax: num('ef-rtax'), active: !$('ef-active').checked });
+      col: v('ef-col'), deps: num('ef-deps') || 0, active: !$('ef-active').checked });
     for (const [k, cnt] of [['allowances', 3], ['deductions', 2]]) e[k] = Array.from({ length: cnt }, (_, i) => ({ name: v(`ef-${k}-${i}-name`), amount: num(`ef-${k}-${i}-amount`) })).filter(x => x.name || x.amount);
     return e;
   }
@@ -1185,6 +1188,52 @@ tfoot td { font-weight: bold; }
     view.empEdit = 'list'; save(); renderPay(); renderStatus();
   });
 
+  /* 住民税（特別徴収の通知書の額を、年度ごとに入れる） */
+
+  function renderRtax() {
+    const fy = view.rtaxEdit, list = (state.employees || []).filter(e => e.active !== false);
+    const val = (e, k) => e.rtaxYears?.[fy]?.[k] ?? (k === 'monthly' && !e.rtaxYears && e.rtax ? e.rtax : '');
+    const y = Number(fy);
+    $('payBox').innerHTML = `<div class="ledger-head"><h2>住民税の入力</h2><button type="button" class="btn ghost" id="rtaxBack">給与の入力に戻る</button></div>
+      <div class="fields"><label class="f" for="rt-year">年度<select id="rt-year">${[y - 1, y, y + 1].map(v => `<option value="${v}"${v === y ? ' selected' : ''}>${v}年度（${v}年6月〜${v + 1}年5月）</option>`).join('')}</select></label></div>
+      <p style="margin:0;font-size:13px">市区町村から届いた「特別徴収税額の決定通知書」の額を入れてください。6月の給与で「6月分」、7月〜翌年5月の給与で「7月〜翌年5月分」を引きます。住民税がない人は空欄のままにします。</p>
+      <div class="table-box"><table><thead><tr><th>氏名</th><th class="num">6月分</th><th class="num">7月〜翌年5月分（毎月）</th><th class="num">年税額</th></tr></thead><tbody>
+      ${list.map(e => `<tr><td>${esc(e.name)}</td>
+        <td class="num"><input type="number" id="rt-${e.id}-june" data-rt="${e.id}" data-k="june" value="${val(e, 'june')}" style="max-width:8em" aria-label="${esc(e.name)} 6月分"></td>
+        <td class="num"><input type="number" id="rt-${e.id}-monthly" data-rt="${e.id}" data-k="monthly" value="${val(e, 'monthly')}" style="max-width:8em" aria-label="${esc(e.name)} 7月〜翌年5月分"></td>
+        <td class="num" id="rt-${e.id}-year"></td></tr>`).join('') || '<tr><td colspan="4" class="empty">従業員が登録されていません。</td></tr>'}
+      </tbody></table></div>
+      <div class="form-foot"><span class="msg" id="rtMsg" role="status"></span><button type="button" class="btn" id="rtSave">保存する</button></div>`;
+    updateRtaxTotals();
+  }
+  function updateRtaxTotals() {
+    for (const e of state.employees || []) {
+      const el = $(`rt-${e.id}-year`); if (!el) continue;
+      const j = optNum($(`rt-${e.id}-june`).value), m = optNum($(`rt-${e.id}-monthly`).value);
+      el.textContent = j || m ? yen((j ?? m ?? 0) + (m || 0) * 11) : '';
+    }
+  }
+  $('payBox').addEventListener('input', e => { if (e.target.dataset.rt) { updateRtaxTotals(); $('rtMsg').textContent = ''; } });
+  $('payBox').addEventListener('change', e => { if (e.target.id === 'rt-year') { view.rtaxEdit = e.target.value; renderRtax(); } });
+  $('payBox').addEventListener('click', e => {
+    const t = e.target;
+    if (t.id === 'rtaxOpen') { view.rtaxEdit = P().rtaxYear(view.month); renderPay(); return; }
+    if (t.id === 'rtaxBack') { view.rtaxEdit = null; renderPay(); return; }
+    if (t.id !== 'rtSave') return;
+    const fy = view.rtaxEdit;
+    for (const emp of state.employees || []) {
+      if (!$(`rt-${emp.id}-june`)) continue;
+      const june = optNum($(`rt-${emp.id}-june`).value), monthly = optNum($(`rt-${emp.id}-monthly`).value);
+      // 以前の「毎月の額」は、年度ごとの登録に切り替えたら使わない
+      const years = emp.rtaxYears ||= {};
+      delete emp.rtax;
+      if (june === undefined && monthly === undefined) delete years[fy];
+      else years[fy] = { ...(june !== undefined && { june }), ...(monthly !== undefined && { monthly }) };
+    }
+    save(); renderStatus();
+    $('rtMsg').className = 'msg ok'; $('rtMsg').textContent = `${fy}年度の住民税を保存しました。`;
+  });
+
   /* 給与明細（A4に2人分） */
 
   function slipHtml(m, e) {
@@ -1194,7 +1243,7 @@ tfoot td { font-weight: bold; }
     const deds = [['健康保険', c.health], ['介護保険', c.care], ['子ども・子育て支援金', c.kids], ['厚生年金', c.pension], ['雇用保険', c.emp], ['所得税', c.itax], ['住民税', c.rtax], ...(e.deductions || []).map(a => [a.name, n0(a.amount)]), ['その他の控除', c.extraDed]];
     return `<div class="slip"><h2>給与明細書　${monthName(m)}支給</h2>
       <div class="hd"><span>${esc(CLIENT_NAME)}</span><span class="who">${esc(e.name)} 様</span></div>
-      <div class="hd small"><span>支給日 ${pd.date ? pd.date.replace(/-/g, '/') : ''}</span><span>計算期間 ${esc(pd.period || defPeriod(m))}</span><span>出勤 ${yen(x.days) || 0}日　労働 ${yen(x.hours) || 0}時間　残業 ${yen(x.otHours) || 0}時間</span></div>
+      <div class="hd small"><span>支給日 ${pd.date ? pd.date.replace(/-/g, '/') : ''}</span><span>計算期間 ${esc(pd.period || defPeriod(m))}</span><span>${[['出勤', x.days, '日'], ['労働', x.hours, '時間'], ['残業', x.otHours, '時間']].filter(([, v]) => v).map(([l, v, u]) => `${l} ${yen(v)}${u}`).join('　')}</span></div>
       <div class="cols"><table><thead><tr><th colspan="2">支給</th></tr></thead><tbody>${pays.map(([l, v]) => row(l, v)).join('')}</tbody><tfoot><tr><td>総支給額</td><td class="n">${yen(c.gross)}</td></tr></tfoot></table>
       <table><thead><tr><th colspan="2">控除</th></tr></thead><tbody>${deds.map(([l, v]) => row(l, v)).join('')}</tbody><tfoot><tr><td>控除の合計</td><td class="n">${yen(c.gross - c.net)}</td></tr></tfoot></table></div>
       <div class="net">差引支給額　<b>${yen(c.net)}円</b></div></div>`;
@@ -1303,7 +1352,7 @@ th, td { border: 1px solid #000; padding: 1mm 1.5mm; } th { background: #eee; fo
 
   /* ---------- 月・帳簿の切り替え ---------- */
 
-  function resetView() { view.empEdit = null; view.ledgerEmp = null; view.editing = null; view.kind = null; view.draft = null; view.submitStep = null; view.countDraft = null; view.reqForm = false; view.confirmDel = null; }
+  function resetView() { view.rtaxEdit = null; view.empEdit = null; view.ledgerEmp = null; view.editing = null; view.kind = null; view.draft = null; view.submitStep = null; view.countDraft = null; view.reqForm = false; view.confirmDel = null; }
   $('prevMonth').addEventListener('click', () => { view.month = shiftMonth(view.month, -1); resetView(); render(); });
   $('nextMonth').addEventListener('click', () => { view.month = shiftMonth(view.month, 1); resetView(); render(); });
   $('yearBtn').addEventListener('click', () => { view.mode = view.mode === 'year' ? 'month' : 'year'; resetView(); render(); });

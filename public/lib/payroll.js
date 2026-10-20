@@ -89,6 +89,17 @@
   const payDate = (m, c) => `${m}-${pad(n(c?.payDay ?? 25) ? Math.min(n(c?.payDay ?? 25), daysIn(m)) : daysIn(m))}`;
   const ruleText = c => `${n(c?.closeDay) ? `${n(c.closeDay)}日` : '末日'}締め・${n(c?.payLag) ? '翌月' : '当月'}${n(c?.payDay ?? 25) ? `${n(c?.payDay ?? 25)}日` : '末日'}払い`;
 
+  // 住民税（特別徴収）：年度は6月〜翌年5月。6月は「6月分」、7月〜翌年5月は「毎月分」を引く。
+  // 年度ごとの登録（rtaxYears）がない人は、以前の「毎月の額」（rtax）を使う
+  const rtaxYear = m => { const [y, mo] = m.split('-').map(Number); return String(mo >= 6 ? y : y - 1); };
+  function rtaxFor(e, m) {
+    if (!e.rtaxYears) return n(e.rtax);
+    if (!m) return 0;
+    const r = e.rtaxYears[rtaxYear(m)];
+    if (!r) return 0;
+    return m.endsWith('-06') && r.june !== undefined && r.june !== '' ? n(r.june) : n(r.monthly);
+  }
+
   function ageAt(birth, date) {
     const [y, mo, d] = birth.split('-').map(Number), [Y, M, D] = date.split('-').map(Number);
     return Y - y - ((M < mo || (M === mo && D < d)) ? 1 : 0);
@@ -128,12 +139,12 @@
     const col = e.col || '甲';
     const autoTax = col === '甲';
     const itax = pick('itax', autoTax ? withholdKou(taxable - shaho, e.deps, P) : n(x.itax));
-    const rtax = pick('rtax', n(e.rtax));
+    const rtax = pick('rtax', rtaxFor(e, opt?.month));
     const fixedDed = sum(e.deductions), extraDed = n(x.extraDed);
     const otherDed = fixedDed + extraDed;
     const net = gross - shaho - itax - rtax - otherDed;
     return { age, premMonth: pm, type, basePay, ot, allow, extraPay, commute, taxable, gross, health, care, kids, pension, emp, shaho, col, autoTax, itax, rtax, fixedDed, extraDed, otherDed, net };
   }
 
-  window.Payroll = { period, payDate, ruleText, STD_GRADES, gradeFor, calc, withholdKou, r50, ageFlags, ageAt, TYPES, DEFAULT_RATES, DEFAULT_TAX };
+  window.Payroll = { rtaxFor, rtaxYear, period, payDate, ruleText, STD_GRADES, gradeFor, calc, withholdKou, r50, ageFlags, ageAt, TYPES, DEFAULT_RATES, DEFAULT_TAX };
 })();
