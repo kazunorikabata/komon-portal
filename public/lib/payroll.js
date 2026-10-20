@@ -211,5 +211,16 @@
     return out;
   }
 
-  window.Payroll = { alerts, fixedKey, rtaxFor, rtaxYear, period, payDate, ruleText, STD_GRADES, gradeFor, calc, withholdKou, r50, ageFlags, ageAt, TYPES, DEFAULT_RATES, DEFAULT_TAX };
+  // 料率・締め日などは、顧問先も事務所も直せる設定（master の paySettings）。以前は事務所の設定（config.payroll）にあった。
+  // 提出した月は、提出したときの料率（その月の cfg）で計算する
+  const SHARED_KEYS = ['rates', 'ratesYear', 'closeDay', 'payLag', 'payDay', 'lag'];
+  const SNAPSHOT_KEYS = ['rates', 'tax', 'lag'];
+  function settings(configPayroll, paySettings, snapshot) {
+    const out = { ...(configPayroll || {}) };
+    for (const k of SHARED_KEYS) if (paySettings?.[k] !== undefined) out[k] = paySettings[k];
+    return { ...out, ...(snapshot || {}) };
+  }
+  const snapshotOf = c => Object.fromEntries(SNAPSHOT_KEYS.filter(k => c[k] !== undefined).map(k => [k, JSON.parse(JSON.stringify(c[k]))]));
+
+  window.Payroll = { settings, snapshotOf, SHARED_KEYS, alerts, fixedKey, rtaxFor, rtaxYear, period, payDate, ruleText, STD_GRADES, gradeFor, calc, withholdKou, r50, ageFlags, ageAt, TYPES, DEFAULT_RATES, DEFAULT_TAX };
 })();

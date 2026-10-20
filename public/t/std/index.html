@@ -917,6 +917,8 @@ tfoot td { font-weight: bold; }
   }
 
   function submitBook(m, b) {
+    // 給与は、提出したときの料率をその月に残す（あとで料率を直しても、この月の計算は変わらない）
+    if (b.isPay && state.pay[m] && !state.pay[m].cfg) state.pay[m].cfg = P().snapshotOf(payCfg());
     addLog(m, `${reopened(m, b.id) ? '再提出' : '提出'}（${b.name}）`);
     const dt = new Date();
     state.submitted[m] = { ...subOf(m), [bkey(b.id)]: `${dt.getMonth() + 1}月${dt.getDate()}日` };
@@ -957,13 +959,15 @@ tfoot td { font-weight: bold; }
   /* ---------- 給与計算 ---------- */
 
   const P = () => window.Payroll;
-  const payCfg = () => CONFIG.payroll || {};
+  const payCfg = () => P().settings(CONFIG.payroll, state.masterRest?.paySettings);
   const empActive = (e, m) => e.active !== false && (!e.joined || e.joined.slice(0, 7) <= m) && (!e.left || e.left.slice(0, 7) >= m);
   const empsOf = m => (state.employees || []).filter(e => empActive(e, m));
   const payRow = (m, eid) => state.pay[m]?.rows?.[eid];
   // 賃金の計算期間（事務所で決めた締め日・支払う月から）
   const defPeriod = m => P().period(m, payCfg()).label;
-  const calcOf = (m, e) => P().calc(e, payRow(m, e.id) || {}, payCfg().rates, payCfg().tax, { month: m, lag: payCfg().lag ?? 1 });
+  // 提出した月は、提出したときの料率で計算する
+  const monthCfg = m => ({ ...payCfg(), ...(state.pay[m]?.cfg || {}) });
+  const calcOf = (m, e) => { const c = monthCfg(m); return P().calc(e, payRow(m, e.id) || {}, c.rates, c.tax, { month: m, lag: c.lag ?? 1 }); };
   // 年齢で決まる社会保険の対象（名前の下に出す）
   function ageNote(e, m) {
     if (!e.birth || !e.shaho) return '';
@@ -989,6 +993,7 @@ tfoot td { font-weight: bold; }
     if (view.empEdit) { renderEmpForm(); return; }
     if (view.ledgerEmp) { renderLedger(); return; }
     if (view.rtaxEdit) { renderRtax(); return; }
+    if (view.paySet) { renderPaySet(); return; }
     const R = payCfg().rates || {};
     const pd = state.pay[m] || {};
     const emps = empsOf(m);
@@ -1000,6 +1005,7 @@ tfoot td { font-weight: bold; }
         <div style="display:flex;flex-wrap:wrap;gap:8px">${lock ? '' : `<button type="button" class="btn" id="payStart"${emps.length ? '' : ' disabled'}>この月の給与を作る</button>`}
           <button type="button" class="btn ghost" id="empOpen">従業員の登録・変更</button>
           <button type="button" class="btn ghost" id="rtaxOpen"${(state.employees || []).length ? '' : ' disabled'}>住民税の入力</button>
+          <button type="button" class="btn ghost" id="psOpen">料率・締め日の設定</button>
           <button type="button" class="btn ghost" id="ledgerOpen"${(state.employees || []).length ? '' : ' disabled'}>賃金台帳</button></div>
         ${emps.length ? '' : '<p style="margin:0;color:var(--ink-soft);font-size:13px">先に「従業員の登録・変更」から従業員を登録してください。</p>'}</div>`;
       return;
@@ -1035,6 +1041,7 @@ tfoot td { font-weight: bold; }
       <div style="display:flex;flex-wrap:wrap;gap:8px">
         <button type="button" class="btn ghost" id="empOpen">従業員の登録・変更</button>
         <button type="button" class="btn ghost" id="rtaxOpen">住民税の入力</button>
+        <button type="button" class="btn ghost" id="psOpen">料率・締め日の設定</button>
         <button type="button" class="btn ghost" id="slipAll">給与明細を印刷（全員）</button>
         <button type="button" class="btn ghost" id="ledgerOpen"${(state.employees || []).length ? '' : ' disabled'}>賃金台帳</button>
       </div>`;
@@ -1081,7 +1088,7 @@ tfoot td { font-weight: bold; }
   }
   let payTimer = null;
   $('payBox').addEventListener('input', e => {
-    if (locked() || view.empEdit || view.ledgerEmp || view.rtaxEdit) return;
+    if (locked() || view.empEdit || view.ledgerEmp || view.rtaxEdit || view.paySet) return;
     if (!e.target.closest('table.pay') && !['py-date', 'py-period'].includes(e.target.id)) return;
     readPayInput(e.target);
     if (reopened(view.month, 'pay')) view.payChanged = true;
@@ -1189,6 +1196,7 @@ tfoot td { font-weight: bold; }
     if (t.id === 'empCancel') { view.empEdit = 'list'; renderPay(); return; }
   });
   $('payBox').addEventListener('submit', e => {
+    if (e.target.id !== 'empForm') return;
     e.preventDefault();
     const emp = readEmpForm(), msgEl = $('efMsg');
     const fail = t => { msgEl.className = 'msg'; msgEl.textContent = t; };
@@ -1209,6 +1217,48 @@ tfoot td { font-weight: bold; }
     const clean = Object.fromEntries(Object.entries(emp).filter(([, v]) => v !== undefined && v !== ''));
     if (i >= 0) list[i] = clean; else list.push(clean);
     view.empEdit = 'list'; save(); renderPay(); renderStatus();
+  });
+
+  /* 料率・締め日の設定（顧問先も事務所も直せる。提出した月は、提出したときの料率のまま） */
+
+  function renderPaySet() {
+    const c = payCfg(), r = { ...P().DEFAULT_RATES, ...c.rates };
+    const num = (id, label, v, ph = '') => `<label class="f" for="ps-${id}">${label}<input type="number" step="any" id="ps-${id}" value="${v ?? ''}" placeholder="${ph}"></label>`;
+    const day = (id, label, v, max) => `<label class="f" for="ps-${id}">${label}<select id="ps-${id}"><option value="0"${!Number(v) ? ' selected' : ''}>末日</option>${Array.from({ length: max }, (_, k) => `<option value="${k + 1}"${Number(v) === k + 1 ? ' selected' : ''}>${k + 1}日</option>`).join('')}</select></label>`;
+    $('payBox').innerHTML = `<div class="ledger-head"><h2>料率・締め日の設定</h2><button type="button" class="btn ghost" id="psBack">給与の入力に戻る</button></div>
+      <form class="entry" id="psForm" novalidate>
+        <div class="sr-sec"><h4>締め日・支給日</h4><div class="fields">
+          ${day('closeDay', '締め日', c.closeDay ?? 0, 28)}
+          <label class="f" for="ps-payLag">支払う月<select id="ps-payLag"><option value="0"${!Number(c.payLag) ? ' selected' : ''}>締め日と同じ月（当月払い）</option><option value="1"${Number(c.payLag) ? ' selected' : ''}>締め日の翌月（翌月払い）</option></select></label>
+          ${day('payDay', '支給日', c.payDay ?? 25, 31)}
+          <label class="f" for="ps-lag">社会保険料の引き方<select id="ps-lag"><option value="1"${(c.lag ?? 1) == 1 ? ' selected' : ''}>翌月徴収（前月分を引く）</option><option value="0"${c.lag == 0 ? ' selected' : ''}>当月徴収（その月の分を引く）</option></select></label>
+        </div></div>
+        <div class="sr-sec"><h4>保険料率（労使合計の料率。従業員の負担はその半分で計算します）</h4><div class="fields">
+          ${num('ratesYear', '料率の年度', c.ratesYear, String(new Date().getFullYear()))}
+          ${num('health', '健康保険料率（％）', r.health, '例：9.85')}
+          ${num('care', '介護保険料率（％）', r.care, '例：1.59')}
+          ${num('kids', '子ども・子育て支援金率（％）', r.kids)}
+          ${num('pension', '厚生年金保険料率（％）', r.pension)}
+          ${num('emp', '雇用保険料率（労働者負担・千分の）', r.emp, '例：5.5')}
+        </div></div>
+        <p style="margin:0;font-size:12px;color:var(--ink-soft)">協会けんぽ・日本年金機構・厚生労働省が公表している今年度の料率を入れてください。健康保険などは3月分の保険料から、雇用保険は4月から変わります。直したら「料率の年度」も直してください。提出済みの月の給与は、提出したときの料率のまま変わりません。</p>
+        <div class="form-foot"><span class="msg" id="psMsg" role="status"></span><button type="submit" class="btn">保存する</button></div>
+      </form>`;
+  }
+  $('payBox').addEventListener('submit', e => {
+    if (e.target.id !== 'psForm') return;
+    e.preventDefault();
+    const v = id => $('ps-' + id).value, num = id => optNum(v(id));
+    const ps = { closeDay: Number(v('closeDay')), payLag: Number(v('payLag')), payDay: Number(v('payDay')), lag: Number(v('lag')),
+      ratesYear: num('ratesYear'), rates: { health: num('health') ?? '', care: num('care') ?? '', kids: num('kids') ?? '', pension: num('pension') ?? '', emp: num('emp') ?? '' } };
+    state.masterRest = { ...state.masterRest, paySettings: ps };
+    if (!state.employees) state.employees = [];
+    save(); renderStatus();
+    $('psMsg').className = 'msg ok'; $('psMsg').textContent = '保存しました。';
+  });
+  $('payBox').addEventListener('click', e => {
+    if (e.target.id === 'psOpen') { view.paySet = true; renderPay(); return; }
+    if (e.target.id === 'psBack') { view.paySet = null; renderPay(); return; }
   });
 
   /* 住民税（特別徴収の通知書の額を、年度ごとに入れる） */
@@ -1409,7 +1459,7 @@ th, td { border: 1px solid #000; padding: 1mm 1.5mm; } th { background: #eee; fo
 
   /* ---------- 月・帳簿の切り替え ---------- */
 
-  function resetView() { view.rtaxEdit = null; view.empEdit = null; view.ledgerEmp = null; view.editing = null; view.kind = null; view.draft = null; view.submitStep = null; view.countDraft = null; view.reqForm = false; view.confirmDel = null; }
+  function resetView() { view.paySet = null; view.rtaxEdit = null; view.empEdit = null; view.ledgerEmp = null; view.editing = null; view.kind = null; view.draft = null; view.submitStep = null; view.countDraft = null; view.reqForm = false; view.confirmDel = null; }
   $('prevMonth').addEventListener('click', () => { view.month = shiftMonth(view.month, -1); resetView(); render(); });
   $('nextMonth').addEventListener('click', () => { view.month = shiftMonth(view.month, 1); resetView(); render(); });
   $('yearBtn').addEventListener('click', () => { view.mode = view.mode === 'year' ? 'month' : 'year'; resetView(); render(); });

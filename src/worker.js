@@ -192,14 +192,14 @@ async function clientApi(request, env, url, email, client, isStaff) {
       const why = clientMonthRule(cur.data, body.data);
       if (why) return fail(423, why);
     }
-    // 給与を使えない人が master を書くときは、従業員の情報を今のまま残す
+    // 給与を使えない人が master を書くときは、従業員の情報と給与の設定を今のまま残す
     if (key === 'master') {
       const allowed = await allowedBooks(env, client, email, isStaff);
       if (allowed && !allowed.includes('pay')) {
         const cur = await getDoc(env, client.id, key);
         if (cur.version !== body.version) return fail(409, 'ほかの人が先に更新しました。画面を読み込み直してください。');
-        const { employees, ...rest } = body.data;
-        body.data = cur.data?.employees ? { ...rest, employees: cur.data.employees } : rest;
+        const { employees, paySettings, ...rest } = body.data;
+        body.data = { ...rest, ...(cur.data?.employees && { employees: cur.data.employees }), ...(cur.data?.paySettings && { paySettings: cur.data.paySettings }) };
       }
     }
     const r = await putDoc(env, client.id, key, body.data, body.version, email);

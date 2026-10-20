@@ -523,7 +523,7 @@ html, body { margin: 0; }
 
   // 給与計算：支給日に、給与・通勤手当／未払費用、控除は 未払費用／法定福利費・預り金。科目は選べて、選んだ科目は覚える
   function payJournals(out) {
-    const pd = CLIENT.pay, P = CFG.payroll || {};
+    const pd = CLIENT.pay, P = Payroll.settings(CFG.payroll, docs.master?.data?.paySettings, pd?.cfg);
     if (!pd?.rows) return;
     // 摘要の「〇月分」は、計算期間の終わりの月（翌月払いなら前の月）
     const d = pd.date || END, h = `${Number(Payroll.period(THIS, P).to.slice(5, 7))}月分給与`, PAY = P.acctPay || '318';
@@ -735,7 +735,7 @@ html, body { margin: 0; }
     }
     $('journal').innerHTML = h + '</tbody>';
     // 給与のお知らせ（顧問先のページと同じもの）
-    const al = book === 'pay' ? Payroll.alerts({ month: THIS, employees: CLIENT.employees, rowOf: (mm, id) => docs['m:' + mm]?.data?.pay?.rows?.[id], cfg: CFG.payroll || {} }) : [];
+    const al = book === 'pay' ? Payroll.alerts({ month: THIS, employees: CLIENT.employees, rowOf: (mm, id) => docs['m:' + mm]?.data?.pay?.rows?.[id], cfg: Payroll.settings(CFG.payroll, docs.master?.data?.paySettings) }) : [];
     $('payAlerts').hidden = !al.length;
     $('payAlerts').innerHTML = al.length ? `<div class="panel" style="border-color:var(--warn-fg)"><h3>給与のお知らせ（${al.length}件）</h3><ul style="margin:0;padding-left:1.2em;display:grid;gap:4px;font-size:13px">${al.map(a => `<li style="${a.level === 'warn' ? 'color:var(--bad);font-weight:500' : ''}">${esc(a.text)}</li>`).join('')}</ul></div>` : '';
     renderAccts(); renderExport();
@@ -1036,8 +1036,14 @@ html, body { margin: 0; }
 
   let cfgDraft = null, cfgDirty = false;
   const list = v => String(v || '').split(/[,、，\n]/).map(x => x.trim()).filter(Boolean);
+  // 顧問先も直せる給与の設定（master の paySettings）。まだなければ、以前の事務所の設定から写す
+  let payDraft = {}, payDirty = false;
   function loadCfgDraft() {
     const cfg = docs.config?.data || {};
+    const old = cfg.payroll || {};
+    payDraft = JSON.parse(JSON.stringify(docs.master?.data?.paySettings || Object.fromEntries(Payroll.SHARED_KEYS.filter(k => old[k] !== undefined).map(k => [k, old[k]]))));
+    payDraft.rates ||= { ...Payroll.DEFAULT_RATES };
+    payDirty = false;
     cfgDraft = JSON.parse(JSON.stringify({ fyStart: 4, ...cfg, cashbooks: cfg.cashbooks?.length ? cfg.cashbooks : [DEFAULT_BOOK] }));
     cfgDirty = false;
   }
@@ -1087,7 +1093,8 @@ html, body { margin: 0; }
 
   const accessBooks = C => [...C.cashbooks, ...(C.payroll?.enabled ? [{ id: 'pay', name: C.payroll.name || '給与' }] : [])];
   function payCfgHtml(C) {
-    const p = C.payroll || {}, r = { ...Payroll.DEFAULT_RATES, ...p.rates }, t = { ...Payroll.DEFAULT_TAX, ...p.tax };
+    // 料率・締め日などは顧問先も直せる設定（master の paySettings）にある
+    const p = { ...(C.payroll || {}), ...payDraft }, r = { ...Payroll.DEFAULT_RATES, ...p.rates }, t = { ...Payroll.DEFAULT_TAX, ...p.tax };
     const daySel = (path, label, v) => `<label class="f" for="pf-${path}">${label}<select id="pf-${path}" data-pf="${path}"><option value="0"${!Number(v) ? ' selected' : ''}>末日</option>${Array.from({ length: path === 'closeDay' ? 28 : 31 }, (_, k) => `<option value="${k + 1}"${Number(v) === k + 1 ? ' selected' : ''}>${k + 1}日</option>`).join('')}</select></label>`;
     const num = (path, label, v, ph = '') => `<label class="f" for="pf-${path}">${label}<input type="number" step="any" id="pf-${path}" data-pf="${path}" value="${v ?? ''}" placeholder="${ph}"></label>`;
     return `<fieldset class="cfg-book"><legend>給与計算</legend>
@@ -1132,6 +1139,11 @@ html, body { margin: 0; }
     try {
       const r = await api(`/api/office/clients/${current.id}/doc/config`, { method: 'PUT', body: JSON.stringify({ data, version: docs.config?.version || 0 }) });
       docs.config = { data, version: r.version };
+      if (payDirty) {
+        const md = { ...(docs.master?.data || {}), paySettings: payDraft };
+        const r2 = await api(`/api/office/clients/${current.id}/doc/master`, { method: 'PUT', body: JSON.stringify({ data: md, version: docs.master?.version || 0 }) });
+        docs.master = { data: md, version: r2.version }; payDirty = false;
+      }
       cfgDirty = false; render(); renderCfg();
       $('cfMsg').className = 'msg ok'; $('cfMsg').textContent = '保存しました。顧問先のページを開き直すと反映されます。';
     } catch (err) { m.className = 'msg'; m.textContent = err.message; if (err.status === 409) showReload(err.message); }
@@ -1150,8 +1162,10 @@ html, body { margin: 0; }
   $('cfgEdit').addEventListener('input', e => {
     const t = e.target, i = t.dataset.b, f = t.dataset.f;
     if (t.dataset.pf) {
-      const p = cfgDraft.payroll ||= { enabled: false, name: '給与', payDay: 25, rates: { ...Payroll.DEFAULT_RATES }, tax: { ...Payroll.DEFAULT_TAX } };
       const path = t.dataset.pf.split('.');
+      cfgDraft.payroll ||= { enabled: false, name: '給与', tax: { ...Payroll.DEFAULT_TAX } };
+      const p = Payroll.SHARED_KEYS.includes(path[0]) ? payDraft : cfgDraft.payroll;
+      if (p === payDraft) payDirty = true;
       const v = t.type === 'checkbox' ? t.checked : t.type === 'number' || ['lag', 'closeDay', 'payDay', 'payLag'].includes(t.dataset.pf) ? (t.value === '' ? '' : Number(t.value)) : t.value;
       if (path.length === 2) (p[path[0]] ||= {})[path[1]] = v; else p[path[0]] = v;
       cfgDirty = true;
