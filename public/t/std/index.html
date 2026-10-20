@@ -1294,7 +1294,6 @@ tfoot td { font-weight: bold; }
         ${section('控<br>除', 'd', deds)}
         ${section('合<br>計', 't', [null, null, null, ...totals])}
       </tbody></table>
-      <p class="note">いつもありがとうございます。内容にご不明な点があれば、お問い合わせください。</p>
     </div>`;
   }
   function printSlips(m, emps) {
@@ -1324,7 +1323,6 @@ tr.h th:not(.lab) { background: #ededed; }
 .grid th.sum, .grid th.sub { font-weight: bold; } .grid td.sum { font-weight: bold; } .grid td.sub { color: #555; }
 .grid th.net { background: #000 !important; color: #fff; font-weight: bold; font-size: 8.5pt; }
 .grid td.net { font-weight: bold; font-size: 12.5pt; color: #000; border: 1.6pt solid #000; }
-.note { margin: 0; font-size: 7.5pt; color: #777; }
 </style></head><body><div class="bar"><button onclick="window.print()">印刷する</button><span>A4縦に2人分ずつ印刷します。</span></div>
 ${Array.from({ length: Math.ceil(emps.length / 2) }, (_, i) => `<div class="page">${emps.slice(i * 2, i * 2 + 2).map(e => slipHtml(m, e)).join('')}</div>`).join('')}
 <script>window.addEventListener('load', () => setTimeout(() => window.print(), 300));<\/script></body></html>`;
