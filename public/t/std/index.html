@@ -1236,36 +1236,72 @@ tfoot td { font-weight: bold; }
 
   /* 給与明細（A4に2人分） */
 
+  // 給与明細：勤怠・支給・控除・合計の欄を、項目名の下に金額を書く升目で並べる（よくある給与明細書の形）
   function slipHtml(m, e) {
     const c = calcOf(m, e), x = payRow(m, e.id) || {}, pd = state.pay[m] || {};
-    const row = (l, v) => v ? `<tr><td>${esc(l)}</td><td class="n">${yen(v)}</td></tr>` : '';
-    const pays = [[P().TYPES[c.type] === '月給' ? '基本給' : `${P().TYPES[c.type]}分`, c.basePay], ['残業手当', c.ot], ...(e.allowances || []).map(a => [a.name, n0(a.amount)]), ['その他の支給', c.extraPay], ['通勤手当', c.commute]];
-    const deds = [['健康保険', c.health], ['介護保険', c.care], ['子ども・子育て支援金', c.kids], ['厚生年金', c.pension], ['雇用保険', c.emp], ['所得税', c.itax], ['住民税', c.rtax], ...(e.deductions || []).map(a => [a.name, n0(a.amount)]), ['その他の控除', c.extraDed]];
-    return `<div class="slip"><h2>給与明細書　${monthName(m)}支給</h2>
-      <div class="hd"><span>${esc(CLIENT_NAME)}</span><span class="who">${esc(e.name)} 様</span></div>
-      <div class="hd small"><span>支給日 ${pd.date ? pd.date.replace(/-/g, '/') : ''}</span><span>計算期間 ${esc(pd.period || defPeriod(m))}</span><span>${[['出勤', x.days, '日'], ['労働', x.hours, '時間'], ['残業', x.otHours, '時間']].filter(([, v]) => v).map(([l, v, u]) => `${l} ${yen(v)}${u}`).join('　')}</span></div>
-      <div class="cols"><table><thead><tr><th colspan="2">支給</th></tr></thead><tbody>${pays.map(([l, v]) => row(l, v)).join('')}</tbody><tfoot><tr><td>総支給額</td><td class="n">${yen(c.gross)}</td></tr></tfoot></table>
-      <table><thead><tr><th colspan="2">控除</th></tr></thead><tbody>${deds.map(([l, v]) => row(l, v)).join('')}</tbody><tfoot><tr><td>控除の合計</td><td class="n">${yen(c.gross - c.net)}</td></tr></tfoot></table></div>
-      <div class="net">差引支給額　<b>${yen(c.net)}円</b></div></div>`;
+    const COLS = 6;
+    const num = v => v ? yen(v) : '';
+    const work = [['出勤日数', x.days ? `${yen(x.days)}日` : ''], ['労働時間', x.hours ? `${yen(x.hours)}時間` : ''], ['残業時間', x.otHours ? `${yen(x.otHours)}時間` : '']];
+    const pays = [[c.type === 'monthly' ? '基本給' : `${P().TYPES[c.type]}分`, num(c.basePay)], ['残業手当', num(c.ot)], ...(e.allowances || []).map(a => [a.name, num(n0(a.amount))]),
+      ...(c.extraPay ? [['その他の支給', yen(c.extraPay)]] : []), ['通勤手当（非課税）', num(c.commute)], ['総支給額', yen(c.gross), 'sum']];
+    const social = c.health + c.care + c.kids + c.pension + c.emp;
+    const deds = [['健康保険', num(c.health)], ['介護保険', num(c.care)], ...(c.kids ? [['子ども・子育て支援金', yen(c.kids)]] : []), ['厚生年金', num(c.pension)], ['雇用保険', num(c.emp)], ['社会保険計', num(social), 'sub'],
+      ['課税対象額', yen(Math.max(0, c.taxable - social)), 'sub'], ['所得税', num(c.itax)], ['住民税', num(c.rtax)], ...(e.deductions || []).map(a => [a.name, num(n0(a.amount))]),
+      ...(c.extraDed ? [['その他の控除', yen(c.extraDed)]] : []), ['控除合計', yen(c.gross - c.net), 'sum']];
+    const totals = [['総支給額', yen(c.gross)], ['控除合計', yen(c.gross - c.net)], ['差引支給額', yen(c.net), 'net']];
+    // 項目を6つずつの段に分け、足りない升目は空けておく。合計の升目はいちばん右に寄せる
+    const section = (label, cls, items) => {
+      const last = items[items.length - 1]?.[2] === 'sum' ? items.pop() : null;
+      const rows = [];
+      for (let i = 0; i < Math.max(items.length, 1); i += COLS) rows.push(items.slice(i, i + COLS));
+      if (last) { const r = rows[rows.length - 1]; if (r.length >= COLS) rows.push([]); const rr = rows[rows.length - 1]; while (rr.length < COLS - 1) rr.push(null); rr.push(last); }
+      return rows.map((r, i) => {
+        const cells = Array.from({ length: COLS }, (_, k) => r[k] || null);
+        return `<tr class="h ${cls}">${i === 0 ? `<th class="lab ${cls}" rowspan="${rows.length * 2}">${label}</th>` : ''}${cells.map(v => `<th class="${v?.[2] || ''}">${v ? esc(v[0]) : ''}</th>`).join('')}</tr>
+          <tr class="v">${cells.map(v => `<td class="${v?.[2] || ''}">${v ? v[1] : ''}</td>`).join('')}</tr>`;
+      }).join('');
+    };
+    return `<div class="slip">
+      <div class="top"><div><div class="co">${esc(CLIENT_NAME)}</div><div class="meta">支給日 ${pd.date ? pd.date.replace(/-/g, '/') : ''}　／　計算期間 ${esc(pd.period || defPeriod(m))}</div></div>
+        <h2>給与明細書<small>${monthName(m)}支給</small></h2>
+        <div class="who"><span>${esc(e.name)}</span> 様</div></div>
+      <table class="grid"><colgroup><col class="labc">${'<col>'.repeat(COLS)}</colgroup><tbody>
+        ${section('勤<br>怠', 'w', work)}
+        ${section('支<br>給', 'p', pays)}
+        ${section('控<br>除', 'd', deds)}
+        ${section('合<br>計', 't', [null, null, null, ...totals])}
+      </tbody></table>
+      <p class="note">いつもありがとうございます。内容にご不明な点があれば、お問い合わせください。</p>
+    </div>`;
   }
   function printSlips(m, emps) {
     if (!emps.length) return;
     const html = `<!doctype html><html lang="ja"><head><meta charset="utf-8"><title>給与明細 ${monthName(m)}</title><style>
 @page { size: A4 portrait; margin: 0; }
-* { box-sizing: border-box; } html, body { margin: 0; background: #e9e9e9; }
-body { font-family: "Hiragino Sans", "Yu Gothic", "Meiryo", sans-serif; color: #000; font-size: 10pt; }
+* { box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; } html, body { margin: 0; background: #e9e9e9; }
+body { font-family: "Hiragino Sans", "Yu Gothic", "Meiryo", sans-serif; color: #1d2733; font-size: 9pt; }
 .bar { background: #eef3f0; padding: 8px 12px; display: flex; gap: 12px; justify-content: center; align-items: center; }
-.page { width: 210mm; height: 297mm; margin: 8mm auto; padding: 10mm 12mm; background: #fff; display: grid; grid-template-rows: 1fr 1fr; gap: 8mm; box-shadow: 0 1px 6px rgba(0,0,0,.2); page-break-after: always; }
+.page { width: 210mm; height: 297mm; margin: 8mm auto; padding: 10mm 11mm; background: #fff; display: grid; grid-template-rows: 1fr 1fr; gap: 0; box-shadow: 0 1px 6px rgba(0,0,0,.2); page-break-after: always; }
 @media print { html, body { background: #fff; } .bar { display: none; } .page { margin: 0; box-shadow: none; } }
-.slip { border: 1px solid #000; padding: 6mm; display: grid; gap: 3mm; align-content: start; }
-.slip + .slip { border-top: 1px dashed #000; }
-h2 { margin: 0; font-size: 14pt; text-align: center; letter-spacing: .2em; }
-.hd { display: flex; justify-content: space-between; gap: 6mm; flex-wrap: wrap; } .hd.small { font-size: 9pt; color: #333; }
-.who { font-size: 12pt; font-weight: bold; border-bottom: 1px solid #000; padding: 0 4mm; }
-.cols { display: grid; grid-template-columns: 1fr 1fr; gap: 5mm; align-items: start; }
-table { width: 100%; border-collapse: collapse; } th, td { border: 1px solid #000; padding: 1mm 2mm; } th { background: #eee; font-weight: normal; }
-.n { text-align: right; font-family: "Courier New", monospace; } tfoot td { font-weight: bold; }
-.net { text-align: right; font-size: 12pt; } .net b { font-size: 15pt; border-bottom: 2px solid #000; padding: 0 3mm; }
+.slip { padding: 4mm 0 6mm; display: grid; gap: 3mm; align-content: start; }
+.slip + .slip { border-top: 1px dashed #999; padding-top: 8mm; }
+.top { display: grid; grid-template-columns: 1fr auto 1fr; align-items: end; gap: 4mm; border-bottom: 2px solid #1f5c4a; padding-bottom: 2mm; }
+.co { font-size: 10.5pt; font-weight: bold; } .meta { font-size: 8pt; color: #555; margin-top: 1mm; }
+h2 { margin: 0; font-size: 16pt; letter-spacing: .3em; text-align: center; color: #1f5c4a; }
+h2 small { display: block; font-size: 8.5pt; letter-spacing: .05em; color: #555; font-weight: normal; margin-top: 1mm; }
+.who { text-align: right; font-size: 9pt; } .who span { font-size: 13pt; font-weight: bold; border-bottom: 1px solid #1d2733; padding: 0 3mm; }
+table.grid { width: 100%; border-collapse: collapse; table-layout: fixed; }
+col.labc { width: 8mm; }
+.grid th, .grid td { border: .6pt solid #8a96a3; height: 6.2mm; padding: .6mm 1.4mm; }
+.grid th { font-weight: normal; font-size: 7.5pt; color: #3b4a5c; text-align: center; white-space: nowrap; overflow: hidden; }
+.grid td { text-align: right; font-family: "Courier New", ui-monospace, monospace; font-size: 10pt; }
+.grid th.lab { color: #fff; font-size: 9.5pt; font-weight: bold; line-height: 1.25; letter-spacing: .1em; }
+.lab.w { background: #6b7a8c; } .lab.p { background: #1f5c4a; } .lab.d { background: #a33a2f; } .lab.t { background: #1d2733; }
+tr.h.w th:not(.lab) { background: #eef1f4; } tr.h.p th:not(.lab) { background: #e4efe9; } tr.h.d th:not(.lab) { background: #f8e7e4; } tr.h.t th:not(.lab) { background: #e9edf2; }
+.grid th.sum, .grid th.sub { font-weight: bold; } .grid td.sum { font-weight: bold; } .grid td.sub { color: #555; }
+.grid th.net { background: #1f5c4a !important; color: #fff; font-weight: bold; font-size: 8.5pt; }
+.grid td.net { font-weight: bold; font-size: 12.5pt; color: #1f5c4a; border: 1.4pt solid #1f5c4a; }
+.note { margin: 0; font-size: 7.5pt; color: #777; }
 </style></head><body><div class="bar"><button onclick="window.print()">印刷する</button><span>A4縦に2人分ずつ印刷します。</span></div>
 ${Array.from({ length: Math.ceil(emps.length / 2) }, (_, i) => `<div class="page">${emps.slice(i * 2, i * 2 + 2).map(e => slipHtml(m, e)).join('')}</div>`).join('')}
 <script>window.addEventListener('load', () => setTimeout(() => window.print(), 300));<\/script></body></html>`;
