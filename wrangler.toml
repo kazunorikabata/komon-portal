@@ -30,3 +30,5 @@ ACCESS_AUD = "7d085be12867a820a38aad700821926c2b06c54038a1362cf6457a4ed678ef02"
 STAFF_EMAILS = "kazunorikabata@kabatax.com,kaba@kabatax.com"
 # 事務所用画面のサブドメイン
 OFFICE_HOST = "office"
+# ホームページなど、このしくみを通さずにそのまま元のサーバーへ渡すサブドメイン（カンマ区切り）
+PASSTHROUGH_HOSTS = "www"

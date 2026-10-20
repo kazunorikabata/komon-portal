@@ -317,6 +317,8 @@ export default {
     try {
       const url = new URL(request.url);
       const sub = url.hostname.split('.')[0].toLowerCase();
+      // ホームページ（www など）は、このしくみと関係ないので、そのまま元のサーバー（VPS）に渡す
+      if (String(env.PASSTHROUGH_HOSTS || '').split(',').map(v => v.trim().toLowerCase()).filter(Boolean).includes(sub)) return fetch(request);
       const email = await verifiedEmail(request, env);
       if (!email) return withHeaders(fail(401, 'ログインしてください。'));
 
