@@ -122,12 +122,49 @@ function clientMonthRule(oldData, newData) {
 
 const MONTH_KEY = /^m:\d{4}-\d{2}$/;
 
+// 標準のひな形では、メールアドレスごとに入力できる出納帳を決められる（config の access）。
+// 指定のない人と事務所のスタッフは、すべての出納帳を使える
+async function allowedBooks(env, client, email, isStaff) {
+  if (isStaff || client.template !== 'std') return null;
+  const list = (await getDoc(env, client.id, 'config')).data?.access?.[email];
+  return Array.isArray(list) ? list : null;
+}
+const pickBooks = (cb, keep) => Object.fromEntries(Object.entries(cb || {}).filter(([k]) => keep(k)));
+
+// 顧問先に渡すデータ：だれが何を使えるか（access）は渡さない。使えない出納帳の中身も渡さない
+function clientView(docs, allowed) {
+  if (docs.config?.data) {
+    const { access, ...cfg } = docs.config.data;
+    if (allowed) cfg.cashbooks = (cfg.cashbooks || []).filter(b => allowed.includes(b.id));
+    docs.config = { ...docs.config, data: cfg };
+  }
+  if (allowed) for (const [k, d] of Object.entries(docs)) {
+    if (MONTH_KEY.test(k) && d.data?.cb) docs[k] = { ...d, data: { ...d.data, cb: pickBooks(d.data.cb, id => allowed.includes(id)) } };
+  }
+  return docs;
+}
+
+// 使える出納帳が限られた人の書き込み：使えない出納帳の中身は今のまま残し、提出・修正依頼も使える出納帳だけにする
+function mergeAllowed(cur, next, allowed) {
+  const o = cur || {}, n = next || {};
+  const cb = { ...pickBooks(o.cb, id => !allowed.includes(id)), ...pickBooks(n.cb, id => allowed.includes(id)) };
+  const merged = { ...n, cb };
+  if (!Object.keys(cb).length) delete merged.cb;
+  const os = subMap(o.submitted), ns = subMap(n.submitted), ok = k => k.startsWith('cb:') && allowed.includes(k.slice(3));
+  for (const k of new Set([...Object.keys(os), ...Object.keys(ns)])) if (!ok(k) && os[k] !== ns[k]) return { error: 'この出納帳は入力できません。' };
+  if ((n.requests || []).slice((o.requests || []).length).some(r => !ok(r.book || ''))) return { error: 'この出納帳は入力できません。' };
+  return { data: merged };
+}
+
 /* ---------- 顧問先のAPI ---------- */
 
-async function clientApi(request, env, url, email, client) {
+async function clientApi(request, env, url, email, client, isStaff) {
   const path = url.pathname;
   if (path === '/api/me' && request.method === 'GET') return json({ email, client: { id: client.id, name: client.name, template: client.template } });
-  if (path === '/api/state' && request.method === 'GET') return json({ docs: await loadDocs(env, client.id, false) });
+  if (path === '/api/state' && request.method === 'GET') {
+    const allowed = await allowedBooks(env, client, email, isStaff);
+    return json({ docs: clientView(await loadDocs(env, client.id, false), allowed) });
+  }
   const m = path.match(/^\/api\/doc\/(master|m:\d{4}-\d{2})$/);
   if (m && request.method === 'PUT') {
     const key = m[1];
@@ -136,6 +173,12 @@ async function clientApi(request, env, url, email, client) {
     if (MONTH_KEY.test(key)) {
       const cur = await getDoc(env, client.id, key);
       if (cur.version !== body.version) return fail(409, 'ほかの人が先に更新しました。画面を読み込み直してください。');
+      const allowed = await allowedBooks(env, client, email, isStaff);
+      if (allowed) {
+        const r = mergeAllowed(cur.data, body.data, allowed);
+        if (r.error) return fail(403, r.error);
+        body.data = r.data;
+      }
       const why = clientMonthRule(cur.data, body.data);
       if (why) return fail(423, why);
     }
@@ -255,7 +298,7 @@ export default {
         : await env.DB.prepare(`SELECT c.* FROM clients c JOIN members m ON m.client_id = c.id
           WHERE c.subdomain = ? AND m.email = ?`).bind(sub, email).first();
       if (!client) return withHeaders(new Response('このページを見る権限がありません。', { status: 403 }));
-      if (url.pathname.startsWith('/api/')) return withHeaders(await clientApi(request, env, url, email, client));
+      if (url.pathname.startsWith('/api/')) return withHeaders(await clientApi(request, env, url, email, client, isStaff));
       // 顧問先ごとのひな形の画面を返す
       const tpl = TEMPLATES[client.template] ? client.template : 'peters';
       return withHeaders(await page(env, request, `/t/${tpl}/`));

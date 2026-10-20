@@ -1029,6 +1029,13 @@ html, body { margin: 0; }
         <div class="checks">${chk(i, 'count', b.count !== false, '提出の前に現金残高確認票を記入する')}${chk(i, 'expPrint', b.expPrint !== false, '経費精算書を印刷できるようにする')}</div>
         <div class="foot"><span class="hint">ID：${esc(b.id)}</span>${C.cashbooks.length > 1 ? `<button type="button" class="link-btn danger" data-rmbook="${i}">この出納帳を外す</button>` : ''}</div>
       </fieldset>`).join('')}
+      <fieldset class="cfg-book"><legend>メールアドレスごとに使える出納帳</legend>
+        <p class="hint">チェックを外した出納帳は、その人の画面に出ず、入力もできません。全部にチェックがある人は、あとで足した出納帳も使えます。事務所のスタッフは、すべての出納帳を使えます。</p>
+        ${(current.emails || []).map((em, k) => {
+          const acc = C.access?.[em];
+          return `<div class="checks"><span style="min-width:14em">${esc(em)}</span>${C.cashbooks.map(b => `<label class="check" for="ca-${k}-${esc(b.id)}"><input type="checkbox" id="ca-${k}-${esc(b.id)}" data-email="${esc(em)}" data-book="${esc(b.id)}"${!acc || acc.includes(b.id) ? ' checked' : ''}>${esc(b.name)}</label>`).join('')}</div>`;
+        }).join('') || '<p class="hint">まだメールアドレスが登録されていません。上の「顧問先とログインできるメールアドレス」で登録してください。</p>'}
+      </fieldset>
       <div class="fields" style="align-items:end">
         <label class="f" for="cf-preset">出納帳を追加する<select id="cf-preset">${Object.entries(PRESETS).map(([k, [l]]) => `<option value="${k}">${esc(l)}</option>`).join('')}</select></label>
         <div><button type="button" class="btn ghost" id="cf-add">追加する</button></div>
@@ -1041,6 +1048,10 @@ html, body { margin: 0; }
     const m = $('cfMsg');
     const bad = cfgDraft.cashbooks.find(b => !b.name.trim() || !b.kinds.length);
     if (bad) { m.className = 'msg'; m.textContent = '出納帳ごとに、名前と記入の種類（1つ以上）を決めてください。'; return; }
+    // 外した出納帳は、使える出納帳の指定からも外す
+    for (const ids of Object.values(cfgDraft.access || {})) for (let k = ids.length - 1; k >= 0; k--) if (!cfgDraft.cashbooks.some(b => b.id === ids[k])) ids.splice(k, 1);
+    const none = Object.entries(cfgDraft.access || {}).find(([, ids]) => !ids.length);
+    if (none) { m.className = 'msg'; m.textContent = `${none[0]} が使える出納帳が1つもありません。1つ以上チェックするか、メールアドレスを外してください。`; return; }
     // 顧問先が選べる科目は、事務所の科目一覧の写し
     const data = { ...cfgDraft, accts: state.accts.map(a => ({ code: a.code, name: a.name })) };
     try {
@@ -1063,6 +1074,16 @@ html, body { margin: 0; }
 
   $('cfgEdit').addEventListener('input', e => {
     const t = e.target, i = t.dataset.b, f = t.dataset.f;
+    if (t.dataset.email) {
+      // 全部にチェック → 指定なし（あとで足した出納帳も使える）
+      const em = t.dataset.email, ids = cfgDraft.cashbooks.map(b => b.id);
+      const cur = cfgDraft.access?.[em] || ids;
+      const next = ids.filter(id => id === t.dataset.book ? t.checked : cur.includes(id));
+      cfgDraft.access ||= {};
+      if (next.length === ids.length) delete cfgDraft.access[em]; else cfgDraft.access[em] = next;
+      cfgDirty = true; $('cfMsg').className = 'msg'; $('cfMsg').textContent = 'まだ保存していない変更があります。';
+      return;
+    }
     if (t.id === 'cf-fy') { cfgDraft.fyStart = Number(t.value); cfgDirty = true; return; }
     if (i === undefined) return;
     const b = cfgDraft.cashbooks[Number(i)];

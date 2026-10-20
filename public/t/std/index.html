@@ -380,8 +380,16 @@ td.partner { min-width: 7em; }
       const res = await fetch('/api/state');
       const body = await res.json();
       if (!res.ok) throw new Error(body.error);
+      // 設定があれば使う（メールアドレスによっては、使える出納帳だけが届く）
       const cfg = body.docs.config?.data;
-      if (cfg?.cashbooks?.length) CONFIG = { accts: [], fyStart: 4, ...cfg };
+      if (cfg?.cashbooks) CONFIG = { accts: [], fyStart: 4, ...cfg };
+      if (!CONFIG.cashbooks.length) {
+        $('ledger').hidden = $('submitBar').hidden = $('tabs').hidden = true;
+        document.querySelector('.status').hidden = $('yearBtn').hidden = document.querySelector('.month-ctl').hidden = true;
+        showReload('このメールアドレスで入力できる出納帳がありません。事務所にお問い合わせください。');
+        $('reloadBtn').hidden = true;
+        return;
+      }
       state = merge(body.docs);
       versions = Object.fromEntries(Object.entries(body.docs).map(([k, d]) => [k, d.version]));
       synced = Object.fromEntries(Object.entries(split(state)).map(([k, v]) => [k, JSON.stringify(v)]));
