@@ -237,9 +237,9 @@ html, body { margin: 0; }
       </div>
       <div class="fields" style="grid-template-columns:5.5em 5.5em 1fr auto;align-items:end">
         <label class="f" for="s-acct">科目コード<input type="text" id="s-acct" inputmode="numeric"></label>
-        <label class="f" for="s-code2">補助コード<input type="text" id="s-code2" inputmode="numeric"></label>
-        <label class="f" for="s-name2">補助の名称<input type="text" id="s-name2"></label>
-        <button type="button" class="btn ghost" id="s-add">補助を追加</button>
+        <label class="f" for="s-code2"><select id="s-kind2" aria-label="補助か銀行か" style="padding:2px 4px;font-size:12px"><option value="sub">補助コード</option><option value="bank">銀行コード</option></select><input type="text" id="s-code2" inputmode="numeric"></label>
+        <label class="f" for="s-name2">名称<input type="text" id="s-name2"></label>
+        <button type="button" class="btn ghost" id="s-add">追加</button>
       </div>
       <span class="msg" id="acctMsg" role="status"></span>
       <div style="display:grid;gap:6px;border-top:1px solid var(--rule);padding-top:12px">
@@ -363,6 +363,8 @@ html, body { margin: 0; }
       taxRules: {},
       subs: {},
       subRules: {},
+      banks: {},
+      bankRules: {},
       over: {},
       settings: { code: '', name: name || '', fy: '', skc: '11', skn: '課税売上', withPay: false, withHeader: false, format: 'jdl' },
     };
@@ -374,6 +376,8 @@ html, body { margin: 0; }
     st.taxRules ||= {};
     st.subs ||= {};       // 科目ごとの補助科目 { 科目コード: [{ code, name }] }
     st.subRules ||= {};   // 摘要・相手先ごとに覚えた補助 { キー: { acct, sub } }
+    st.banks ||= {};      // 科目ごとの銀行コード（MJS）{ 科目コード: [{ code, name }] }
+    st.bankRules ||= {};  // 摘要・相手先ごとに覚えた銀行 { キー: { acct, bank } }
     st.settings = { ...defaultOffice('').settings, ...st.settings, skc: st.settings?.skc || '11', skn: st.settings?.skn || '課税売上' };
     return st;
   }
@@ -614,13 +618,21 @@ html, body { margin: 0; }
         if (j.bucket === 'ot' && tr) j.tax = tr;
         if (!o.tax && j[j.need] && acct(j[j.need])?.noTax) j.tax = '0';
       }
-      // 選んだ科目に補助科目があれば、上書き → 覚えた補助（同じ科目のときだけ）の順に入れる
-      if (j.need && state.subs[j[j.need]]?.length) {
-        const code = j[j.need], keys = [normDesc(j.desc), j.partner && 'p:' + normDesc(j.partner)].filter(Boolean);
-        const learnedSub = keys.map(k => state.subRules[k]).find(r => r && r.acct === code)?.sub;
-        const sc = o.sub !== undefined && o.subAcct === code ? o.sub : learnedSub || '';
-        const sub = state.subs[code].find(x => x.code === sc);
-        j[j.need + 'Sub'] = sub ? { ...sub } : null;
+      // 補助科目・銀行コードのある科目は、どちらも必ず入れる（ないと会計ソフトに取り込めない）。
+      // 上書き → 覚えたもの（相手の科目で、同じ科目のときだけ）の順に入れる
+      const keys = [normDesc(j.desc), j.partner && 'p:' + normDesc(j.partner)].filter(Boolean);
+      for (const s of ['dr', 'cr']) {
+        const code = j[s];
+        for (const [kind, lists, rules, field] of [['Sub', state.subs, state.subRules, 'sub'], ['Bank', state.banks, state.bankRules, 'bank']]) {
+          const list = lists[code];
+          if (!list?.length || j[s + kind]) continue;
+          const ov = o[field + '_' + s];
+          const learnedV = s === j.need ? keys.map(k => rules[k]).find(r => r && r.acct === code)?.[field] : undefined;
+          const v = ov && ov.acct === code ? ov.code : learnedV;
+          const hit = list.find(x => x.code === v);
+          j[s + kind] = hit ? { ...hit } : null;
+          j['ask' + kind + s] = true;   // 選ぶ欄を出す
+        }
       }
       if (o.tax) j.tax = o.tax;
       if (o.tekiyo !== undefined) j.tekiyo = o.tekiyo;
@@ -629,13 +641,16 @@ html, body { margin: 0; }
   }
 
   const acctOptions = sel => `<option value="">科目を選ぶ</option>` + state.accts.map(a => `<option value="${a.code}"${a.code === sel ? ' selected' : ''}>${a.code} ${esc(a.name)}</option>`).join('');
-  // 補助科目のある科目なら、補助を選ぶ欄を出す
-  const subSelect = (j, s) => {
-    const list = state.subs[j[s]];
-    if (!list?.length) return '';
-    const sel = j[s + 'Sub']?.code ?? '';
-    return `<select id="sub-${j.key}" data-sub="${j.key}" aria-label="${md(j.date)} ${esc(j.desc)}の補助科目" style="margin-top:4px"><option value="">（補助なし）</option>${list.map(x => `<option value="${esc(x.code)}"${x.code === sel ? ' selected' : ''}>${esc(x.code)} ${esc(x.name)}</option>`).join('')}</select>`;
+  // 補助科目・銀行コードのある科目なら、選ぶ欄を出す（未設定は赤）
+  const isMjs = () => state.settings.format === 'mjs';
+  const missingAttr = (j, s) => (j['askSub' + s] && !j[s + 'Sub']) || (isMjs() && j['askBank' + s] && !j[s + 'Bank']);
+  const rowProblem = j => (j.need && !j[j.need]) || ['dr', 'cr'].some(s => j[s] && missingAttr(j, s));
+  const attrSelect = (j, s, kind) => {
+    if (!j['ask' + kind + s] || (kind === 'Bank' && !isMjs())) return '';
+    const list = (kind === 'Sub' ? state.subs : state.banks)[j[s]], sel = j[s + kind]?.code ?? '', label = kind === 'Sub' ? '補助' : '銀行';
+    return `<select id="${kind}-${s}-${j.key}" data-attr="${j.key}" data-side="${s}" data-kind="${kind}" class="${sel ? '' : 'need'}" aria-label="${md(j.date)} ${esc(j.desc)}の${label}" style="margin-top:4px"><option value="">${label}を選ぶ</option>${list.map(x => `<option value="${esc(x.code)}"${x.code === sel ? ' selected' : ''}>${esc(x.code)} ${esc(x.name)}</option>`).join('')}</select>`;
   };
+  const subSelect = (j, s) => attrSelect(j, s, 'Sub') + attrSelect(j, s, 'Bank');
   const fixedCell = (code, sub) => `<span class="fixed"><code>${code}</code>${esc(acct(code)?.name || '？')}${sub ? `／${esc(sub.code)} ${esc(sub.name)}` : ''}</span>`;
 
   // 提出は帳簿ごと。以前の「月まとめて」の提出（文字列）は3つとも提出済みとみなす
@@ -663,18 +678,18 @@ html, body { margin: 0; }
     renderBal();
     const js = journals(book);
     const all = Object.keys(BOOKS).flatMap(b => journals(b));
-    const need = all.filter(j => j.need && !j[j.need]).length;
+    const need = all.filter(rowProblem).length;
     $('chips').innerHTML =
       `<span class="chip">仕訳 <b>${all.length}</b> 行</span>` +
-      (need ? `<span class="chip bad">科目が未設定 <b>${need}</b> 行</span>` : `<span class="chip ok">すべての科目を設定済み</span>`) +
+      (need ? `<span class="chip bad">科目・補助${isMjs() ? '・銀行' : ''}が未設定 <b>${need}</b> 行</span>` : `<span class="chip ok">すべての科目を設定済み</span>`) +
       `<span class="chip">自動で入った科目 <b>${all.filter(j => j.auto).length}</b> 行</span>` +
       `<span class="chip">インボイスなし <b>${all.filter(j => j.noInv && j.tax !== '0').length}</b> 行</span>`;
-    let h = `<thead><tr><th>日付</th><th>借方</th><th>貸方</th><th class="num">金額</th><th>税区分</th><th>摘要（JDLに出る文字）</th><th>顧問先の入力</th></tr></thead><tbody>`;
+    let h = `<thead><tr><th>日付</th><th>借方</th><th>貸方</th><th class="num">金額</th><th>税区分</th><th>摘要（会計ソフトに出る文字）</th><th>顧問先の入力</th></tr></thead><tbody>`;
     for (const j of js) {
-      const missing = j.need && !j[j.need];
+      const missing = rowProblem(j);
       const side = s => j.need === s
-        ? `<select id="acct-${j.key}" data-acct="${j.key}" class="${missing ? 'need' : ''}" aria-label="${md(j.date)} ${esc(j.desc)}の科目">${acctOptions(j[s])}</select>${subSelect(j, s)}${j.auto ? `<div class="auto">${j.auto}</div>` : ''}`
-        : fixedCell(j[s], j[s + 'Sub']);
+        ? `<select id="acct-${j.key}" data-acct="${j.key}" class="${j.need && !j[j.need] ? 'need' : ''}" aria-label="${md(j.date)} ${esc(j.desc)}の科目">${acctOptions(j[s])}</select>${subSelect(j, s)}${j.auto ? `<div class="auto">${j.auto}</div>` : ''}`
+        : fixedCell(j[s], j['askSub' + s] ? null : j[s + 'Sub']) + subSelect(j, s);
       h += `<tr class="${missing ? 'need' : ''}"><td class="date">${md(j.date)}</td><td>${side('dr')}</td><td>${side('cr')}</td><td class="num">${yen(j.amt)}</td>
         <td><select id="tax-${j.key}" data-tax="${j.key}" aria-label="税区分">${Object.entries(TAXES).map(([k, t]) => `<option value="${k}"${k === j.tax ? ' selected' : ''}>${t.label}</option>`).join('')}</select></td>
         <td><input type="text" id="tek-${j.key}" data-tek="${j.key}" value="${esc(j.tekiyo)}" aria-label="摘要"></td>
@@ -705,7 +720,7 @@ html, body { margin: 0; }
 
   function renderAccts() {
     $('accts').innerHTML = `<thead><tr><th>コード</th><th>名称</th><th>税なし</th></tr></thead><tbody>` +
-      state.accts.map(a => `<tr><td class="num">${a.code}</td><td>${esc(a.name)}${state.subs[a.code]?.length ? `<div class="hint">補助：${state.subs[a.code].map(x => `${esc(x.code)} ${esc(x.name)}`).join('、')}</div>` : ''}</td><td><input type="checkbox" id="nt-${a.code}" data-notax="${a.code}"${a.noTax ? ' checked' : ''} aria-label="${esc(a.name)}は税なし"></td></tr>`).join('') + '</tbody>';
+      state.accts.map(a => `<tr><td class="num">${a.code}</td><td>${esc(a.name)}${state.subs[a.code]?.length ? `<div class="hint">補助：${state.subs[a.code].map(x => `${esc(x.code)} ${esc(x.name)}`).join('、')}</div>` : ''}${state.banks[a.code]?.length ? `<div class="hint">銀行：${state.banks[a.code].map(x => `${esc(x.code)} ${esc(x.name)}`).join('、')}</div>` : ''}</td><td><input type="checkbox" id="nt-${a.code}" data-notax="${a.code}"${a.noTax ? ' checked' : ''} aria-label="${esc(a.name)}は税なし"></td></tr>`).join('') + '</tbody>';
   }
 
   /* ---------- CSV ---------- */
@@ -723,11 +738,13 @@ html, body { margin: 0; }
     const js = journals(which);
     const problems = [];
     if (js.some(j => j.need && !j[j.need])) problems.push('科目が未設定の行があります。');
+    if (js.some(j => ['dr', 'cr'].some(s => j['askSub' + s] && !j[s + 'Sub']))) problems.push('補助科目が未設定の行があります。');
+    if (S.format === 'mjs' && js.some(j => ['dr', 'cr'].some(s => j['askBank' + s] && !j[s + 'Bank']))) problems.push('銀行コードが未設定の行があります。');
     if (S.format === 'mjs') {
       const lines = ['"伝票日付","（借）科目ｺｰﾄﾞ","（借）科目名","（借）補助ｺｰﾄﾞ","（借）補助名","（借）銀行ｺｰﾄﾞ","（借）銀行名","（貸）科目ｺｰﾄﾞ","（貸）科目名","（貸）補助ｺｰﾄﾞ","（貸）補助名","（貸）銀行ｺｰﾄﾞ","（貸）銀行名","金額","消費税ｺｰﾄﾞ","消費税率","事業者取引区分","摘要","摘要コード1","摘要コード2","摘要コード3"'];
       for (const j of js) {
-        const side = (code, sub) => [code, q(acct(code)?.name), sub?.code ?? '', q(sub?.name), '""', '""'];
-        lines.push([j.date.replace(/-/g, '/'), ...side(j.dr, j.drSub), ...side(j.cr, j.crSub), j.amt, ...mjsTax(j), q(j.tekiyo), 0, 0, 0].join(','));
+        const side = (code, sub, bank) => [code, q(acct(code)?.name), sub?.code ?? '', q(sub?.name), q(bank?.code), q(bank?.name)];
+        lines.push([j.date.replace(/-/g, '/'), ...side(j.dr, j.drSub, j.drBank), ...side(j.cr, j.crSub, j.crBank), j.amt, ...mjsTax(j), q(j.tekiyo), 0, 0, 0].join(','));
       }
       return { text: lines.join('\r\n') + '\r\n', problems, count: js.length };
     }
@@ -775,12 +792,15 @@ html, body { margin: 0; }
       if (t.value && j.partner) state.rules['p:' + normDesc(j.partner)] = t.value;   // 同じ相手先にも
       if (t.value && acct(t.value)?.noTax) state.over[j.key].tax = '0';
     }
-    if (t.dataset.sub) {
-      const j = journals(book).find(x => x.key === t.dataset.sub), code = j[j.need];
-      state.over[j.key] = { ...(state.over[j.key] || {}), sub: t.value, subAcct: code };
-      // 同じ摘要・相手先の取引に次回から同じ補助を入れる
-      state.subRules[normDesc(j.desc)] = { acct: code, sub: t.value };
-      if (j.partner) state.subRules['p:' + normDesc(j.partner)] = { acct: code, sub: t.value };
+    if (t.dataset.attr) {
+      const j = journals(book).find(x => x.key === t.dataset.attr), s = t.dataset.side, code = j[s];
+      const field = t.dataset.kind === 'Sub' ? 'sub' : 'bank', rules = field === 'sub' ? state.subRules : state.bankRules;
+      state.over[j.key] = { ...(state.over[j.key] || {}), [field + '_' + s]: { acct: code, code: t.value } };
+      // 相手の科目なら、同じ摘要・相手先の取引に次回から同じものを入れる
+      if (s === j.need && t.value) {
+        rules[normDesc(j.desc)] = { acct: code, [field]: t.value };
+        if (j.partner) rules['p:' + normDesc(j.partner)] = { acct: code, [field]: t.value };
+      }
     }
     if (t.dataset.tax) state.over[t.dataset.tax] = { ...(state.over[t.dataset.tax] || {}), tax: t.value };
     if (t.dataset.tek) state.over[t.dataset.tek] = { ...(state.over[t.dataset.tek] || {}), tekiyo: t.value.trim() };
@@ -790,8 +810,8 @@ html, body { margin: 0; }
 
   $('fillNext').addEventListener('click', () => {
     for (const b of [book, ...Object.keys(BOOKS).filter(x => x !== book)]) {
-      const j = journals(b).find(x => x.need && !x[x.need]);
-      if (j) { book = b; render(); const el = $('acct-' + j.key); el.scrollIntoView({ block: 'center' }); el.focus(); return; }
+      const j = journals(b).find(rowProblem);
+      if (j) { book = b; render(); const el = document.querySelector(`[id="acct-${j.key}"].need, [data-attr="${j.key}"].need`) || $('acct-' + j.key); el.scrollIntoView({ block: 'center' }); el.focus(); return; }
     }
   });
 
@@ -824,7 +844,7 @@ html, body { margin: 0; }
       let text;
       try { text = new TextDecoder('utf-8', { fatal: true }).decode(buf); } catch (err) { text = new TextDecoder('shift_jis').decode(buf); }
       const z = v => String(v || '').replace(/　/g, '').trim();
-      const acc = {}, tax = {}, names = {}, subs = {}, subAcc = {};
+      const acc = {}, tax = {}, names = {}, subs = {}, subAcc = {}, banks = {}, bankAcc = {};
       let rows = 0, added = 0, renamed = 0;
       const cashCodes = isStd() ? CFG.cashbooks.map(b => b.acct || CASH) : [CASH];
       // 回数が同じなら、日付の新しいほうを使う（日付は数字にして大小で比べる）
@@ -836,12 +856,13 @@ html, body { margin: 0; }
         : code === '30' ? (sales ? null : 'n34') : code === '40' || code === '0' ? '0' : null;
       for (const r of all) {
         // JDL：番号,日付,借方,名,補助,名,貸方,名,補助,名,金額,摘要,課区,…,税区…　MJS：日付,借方,名,補助,名,銀行,名,貸方,名,補助,名,銀行,名,金額,税コード,税率,区分,摘要
-        let at, dr, drName, cr, crName, desc, tk, drSub, drSubName, crSub, crSubName;
+        let at, dr, drName, cr, crName, desc, tk, drSub, drSubName, crSub, crSubName, drBank, drBankName, crBank, crBankName;
         if (mjs) {
           if (!/^\d{4}\/\d{1,2}\/\d{1,2}$/.test(r[0] || '') || r.length < 18) continue;
           at = Number(r[0].split('/').map((v, i) => i ? v.padStart(2, '0') : v).join(''));
           [dr, drName, cr, crName, desc] = [r[1], r[2], r[7], r[8], r[17]];
           [drSub, drSubName, crSub, crSubName] = [r[3], r[4], r[9], r[10]];
+          [drBank, drBankName, crBank, crBankName] = [r[5], r[6], r[11], r[12]];
           tk = fromMjs(r[14], r[15], r[16], cashCodes.includes(dr));
         } else {
           if (!/^\d+$/.test(r[0] || '') || r.length < 16) continue;
@@ -855,6 +876,7 @@ html, body { margin: 0; }
           if (code && /^\d+$/.test(code) && z(name)) names[code] = z(name);
           if (code && /^\d+$/.test(sc || '') && z(sn)) (subs[code] ||= {})[sc] = z(sn);
         }
+        for (const [code, bc, bn] of [[dr, drBank, drBankName], [cr, crBank, crBankName]]) if (code && /^\d+$/.test(bc || '') && z(bn)) (banks[code] ||= {})[bc] = z(bn);
         // 現金の取引だけを覚える（顧問先が入力するのは出納帳なので）
         const other = cashCodes.includes(cr) ? dr : cashCodes.includes(dr) ? cr : null;
         if (!other || other === FUKUGO) continue;
@@ -871,6 +893,11 @@ html, body { margin: 0; }
           bump(subAcc[d] ||= {}, `${other}/${osub}`, at);
           if (m) bump(subAcc['p:' + normDesc(m[1])] ||= {}, `${other}/${osub}`, at);
         }
+        const obank = other === dr ? drBank : crBank;
+        if (/^\d+$/.test(obank || '')) {
+          bump(bankAcc[d] ||= {}, `${other}/${obank}`, at);
+          if (m) bump(bankAcc['p:' + normDesc(m[1])] ||= {}, `${other}/${obank}`, at);
+        }
       }
       if ($('learnOnly').checked && Object.keys(names).length) { state.accts = []; state.ownChart = true; }
       for (const [code, name] of Object.entries(names)) {
@@ -882,17 +909,22 @@ html, body { margin: 0; }
       let n = 0;
       for (const [d, o] of Object.entries(acc)) { state.rules[d] = top(o); n++; }
       for (const [d, o] of Object.entries(tax)) state.taxRules[d] = top(o);
-      if ($('learnOnly').checked) state.subs = {};
-      let nsub = 0;
-      for (const [code, o] of Object.entries(subs)) {
-        const list = state.subs[code] ||= [];
-        for (const [sc, sn] of Object.entries(o)) { const x = list.find(v => v.code === sc); if (x) x.name = sn; else { list.push({ code: sc, name: sn }); nsub++; } }
-        list.sort((a, b) => Number(a.code) - Number(b.code));
-      }
+      if ($('learnOnly').checked) { state.subs = {}; state.banks = {}; }
+      let nsub = 0, nbank = 0;
+      const mergeList = (target, src, onAdd) => {
+        for (const [code, o] of Object.entries(src)) {
+          const list = target[code] ||= [];
+          for (const [c, n] of Object.entries(o)) { const x = list.find(v => v.code === c); if (x) x.name = n; else { list.push({ code: c, name: n }); onAdd(); } }
+          list.sort((a, b) => Number(a.code) - Number(b.code));
+        }
+      };
+      mergeList(state.subs, subs, () => nsub++);
+      mergeList(state.banks, banks, () => nbank++);
       for (const [d, o] of Object.entries(subAcc)) { const [acctCode, sub] = top(o).split('/'); state.subRules[d] = { acct: acctCode, sub }; }
+      for (const [d, o] of Object.entries(bankAcc)) { const [acctCode, bank] = top(o).split('/'); state.bankRules[d] = { acct: acctCode, bank }; }
       state.accts.sort((a, b) => Number(a.code) - Number(b.code));
       save(); render(); renderCfg();
-      m.className = 'msg ok'; m.textContent = `${mjs ? 'MJS' : 'JDL'}の${rows}行の仕訳から、摘要${n}件の科目を覚えました。科目を${added}件追加し、${renamed}件の名称をそろえました。補助科目を${nsub}件追加しました。`;
+      m.className = 'msg ok'; m.textContent = `${mjs ? 'MJS' : 'JDL'}の${rows}行の仕訳から、摘要${n}件の科目を覚えました。科目を${added}件追加し、${renamed}件の名称をそろえました。補助科目を${nsub}件、銀行コードを${nbank}件追加しました。`;
       if (added || renamed) syncCfgAccts();
     } catch (err) { m.className = 'msg'; m.textContent = err.message || 'CSVを読めませんでした。'; }
     e.target.value = '';
@@ -919,16 +951,17 @@ html, body { margin: 0; }
 
   $('s-add').addEventListener('click', () => {
     const code = $('s-acct').value.trim(), sc = $('s-code2').value.trim(), name = $('s-name2').value.trim(), m = $('acctMsg');
+    const bank = $('s-kind2').value === 'bank', label = bank ? '銀行' : '補助';
     m.className = 'msg';
     if (!acct(code)) { m.textContent = `科目コード ${code} が科目一覧にありません。`; return; }
-    if (!/^\d+$/.test(sc)) { m.textContent = '補助コードは数字で入力してください。'; return; }
-    if (!name) { m.textContent = '補助の名称を入力してください。'; return; }
-    const list = state.subs[code] ||= [], x = list.find(v => v.code === sc);
+    if (!/^\d+$/.test(sc)) { m.textContent = `${label}コードは数字で入力してください。`; return; }
+    if (!name) { m.textContent = `${label}の名称を入力してください。`; return; }
+    const list = (bank ? state.banks : state.subs)[code] ||= [], x = list.find(v => v.code === sc);
     if (x) x.name = name; else list.push({ code: sc, name });
     list.sort((a, b) => Number(a.code) - Number(b.code));
     $('s-code2').value = ''; $('s-name2').value = '';
     save(); render();
-    m.className = 'msg ok'; m.textContent = `${code} ${acct(code).name} に補助 ${sc} ${name} を${x ? '入れ直' : '追加'}しました。`;
+    m.className = 'msg ok'; m.textContent = `${code} ${acct(code).name} に${label} ${sc} ${name} を${x ? '入れ直' : '追加'}しました。`;
   });
 
   $('exportBtn').addEventListener('click', async () => {
