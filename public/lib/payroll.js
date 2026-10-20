@@ -42,6 +42,17 @@
 
   const TYPES = { monthly: '月給', hourly: '時給', daily: '日給' };
 
+  // 標準報酬月額の等級表（健康保険 1〜50等級。厚生年金は 88,000円〜650,000円の 1〜32等級）。[標準報酬月額, 報酬月額の下限（以上）]
+  const STD_TABLE = [[58000, 0], [68000, 63000], [78000, 73000], [88000, 83000], [98000, 93000], [104000, 101000], [110000, 107000], [118000, 114000], [126000, 122000], [134000, 130000], [142000, 138000], [150000, 146000], [160000, 155000], [170000, 165000], [180000, 175000], [190000, 185000], [200000, 195000], [220000, 210000], [240000, 230000], [260000, 250000], [280000, 270000], [300000, 290000], [320000, 310000], [340000, 330000], [360000, 350000], [380000, 370000], [410000, 395000], [440000, 425000], [470000, 455000], [500000, 485000], [530000, 515000], [560000, 545000], [590000, 575000], [620000, 605000], [650000, 635000], [680000, 665000], [710000, 695000], [750000, 730000], [790000, 770000], [830000, 810000], [880000, 855000], [930000, 905000], [980000, 955000], [1030000, 1005000], [1090000, 1055000], [1150000, 1115000], [1210000, 1175000], [1270000, 1235000], [1330000, 1295000], [1390000, 1355000]];
+  const STD_GRADES = STD_TABLE.map(([std, lo], i) => {
+    const hi = STD_TABLE[i + 1]?.[1] || null;
+    // 厚生年金は 88,000円未満は1等級、650,000円を超えると32等級で計算する
+    const pen = std < 88000 ? 1 : std > 650000 ? 32 : i - 2;
+    return { std, lo, hi, health: i + 1, pension: pen };
+  });
+  // 報酬月額から等級を探す
+  const gradeFor = pay => STD_GRADES.find(g => pay >= g.lo && (g.hi === null || pay < g.hi)) || STD_GRADES[0];
+
   // 年齢での判定。「〇歳に達した日」は誕生日の前日（年齢計算に関する法律）。月は 'YYYY-MM'
   const ymOf = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
   const shiftYM = (m, k) => { const [y, mo] = m.split('-').map(Number); return ymOf(new Date(y, mo - 1 + k, 1)); };
@@ -109,5 +120,5 @@
     return { age, premMonth: pm, type, basePay, ot, allow, extraPay, commute, taxable, gross, health, care, kids, pension, emp, shaho, col, autoTax, itax, rtax, fixedDed, extraDed, otherDed, net };
   }
 
-  window.Payroll = { calc, withholdKou, r50, ageFlags, ageAt, TYPES, DEFAULT_RATES, DEFAULT_TAX };
+  window.Payroll = { STD_GRADES, gradeFor, calc, withholdKou, r50, ageFlags, ageAt, TYPES, DEFAULT_RATES, DEFAULT_TAX };
 })();

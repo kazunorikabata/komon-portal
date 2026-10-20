@@ -1125,7 +1125,8 @@ tfoot td { font-weight: bold; }
         <div class="sr-sec"><h4>社会保険・雇用保険</h4>
           <div class="fields">
             <label class="check" for="ef-shaho"><input type="checkbox" id="ef-shaho"${e.shaho ? ' checked' : ''}>健康保険・厚生年金に加入</label>
-            <label class="f" for="ef-std">標準報酬月額（円）<input type="number" id="ef-std" value="${e.std ?? ''}" placeholder="例：260000"></label>
+            <label class="f" for="ef-std">標準報酬月額（等級）<select id="ef-std"><option value="">選ぶ</option>${stdOptions(e.std)}</select></label>
+            <label class="f" for="ef-findStd">報酬月額から選ぶ（円・任意）<input type="number" id="ef-findStd" placeholder="例：255000"></label>
             <label class="check" for="ef-care"><input type="checkbox" id="ef-care"${e.care ? ' checked' : ''}>介護保険の対象（生年月日を入れたときは年齢で自動判定）</label>
             <label class="check" for="ef-koyo"><input type="checkbox" id="ef-koyo"${e.koyo ? ' checked' : ''}>雇用保険に加入</label>
           </div></div>
@@ -1141,6 +1142,17 @@ tfoot td { font-weight: bold; }
           <div style="display:flex;gap:8px"><button type="button" class="btn ghost" id="empCancel">やめる</button><button type="submit" class="btn">保存する</button></div></div>
       </form>`;
   }
+  const yenK = v => v.toLocaleString('ja-JP');
+  function stdOptions(sel) {
+    const gs = P().STD_GRADES;
+    const extra = sel && !gs.some(g => g.std === Number(sel)) ? `<option value="${sel}" selected>${yen(sel)}円（等級表にない額）</option>` : '';
+    return extra + gs.map(g => `<option value="${g.std}"${g.std === Number(sel) ? ' selected' : ''}>健保${g.health}等級${g.pension ? `・厚年${g.pension}等級` : ''}　${yenK(g.std)}円（報酬 ${yenK(g.lo)}〜${g.hi ? yenK(g.hi - 1) : ''}円）</option>`).join('');
+  }
+  $('payBox').addEventListener('input', e => {
+    if (e.target.id !== 'ef-findStd') return;
+    const v = Number(e.target.value);
+    if (v > 0) $('ef-std').value = String(P().gradeFor(v).std);
+  });
   function readEmpForm() {
     const e = view.empDraft, v = id => $(id).value.trim(), num = id => optNum($(id).value);
     Object.assign(e, { birth: v('ef-birth') || undefined, name: v('ef-name'), sex: v('ef-sex') || undefined, type: v('ef-type'), base: num('ef-base'), otRate: num('ef-otRate'), joined: v('ef-joined') || undefined, left: v('ef-left') || undefined,
