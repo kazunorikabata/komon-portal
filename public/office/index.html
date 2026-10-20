@@ -108,6 +108,8 @@ pre.preview {
 table.accts { min-width: 0; }
 table.accts td { padding: 5px 8px; }
 table.accts input { padding: 4px 6px; }
+table.accts tr.sub td { font-size: 13px; color: var(--ink-soft); padding-top: 2px; padding-bottom: 2px; border-bottom-style: dashed; }
+table.accts tr.sub .kind { font-size: 11px; border: 1px solid var(--rule); border-radius: 4px; padding: 0 5px; margin-right: 6px; }
 .hint { margin: 0; font-size: 12px; color: var(--ink-soft); }
 .bal { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
 .bal .tile { background: var(--sheet); border: 1px solid var(--rule); border-radius: 4px; padding: 12px 14px; display: grid; gap: 4px; min-width: 0; }
@@ -718,9 +720,13 @@ html, body { margin: 0; }
       <div class="tile"><span>312 買掛金（仕入の未払い）</span><b>${yen(sum(ap))}</b><details><summary>内訳 ${ap.length}件</summary><ul>${ap.map(r => `<li>${mn(r.m)} ${esc(r.name)} ${yen(r.left)}円</li>`).join('') || '<li>なし</li>'}</ul></details></div>`;
   }
 
+  // 科目の下に、補助科目・銀行コードを1行ずつ出す
   function renderAccts() {
+    const subRows = (code, kind) => ((kind === 'sub' ? state.subs : state.banks)[code] || []).map(x =>
+      `<tr class="sub"><td class="num">${esc(code)}-${esc(x.code)}</td><td><span class="kind">${kind === 'sub' ? '補助' : '銀行'}</span>${esc(x.code)} ${esc(x.name)}</td>
+        <td><button type="button" class="link-btn danger" data-rmattr="${kind}" data-acct="${esc(code)}" data-code="${esc(x.code)}" aria-label="${esc(x.name)}を消す">消す</button></td></tr>`).join('');
     $('accts').innerHTML = `<thead><tr><th>コード</th><th>名称</th><th>税なし</th></tr></thead><tbody>` +
-      state.accts.map(a => `<tr><td class="num">${a.code}</td><td>${esc(a.name)}${state.subs[a.code]?.length ? `<div class="hint">補助：${state.subs[a.code].map(x => `${esc(x.code)} ${esc(x.name)}`).join('、')}</div>` : ''}${state.banks[a.code]?.length ? `<div class="hint">銀行：${state.banks[a.code].map(x => `${esc(x.code)} ${esc(x.name)}`).join('、')}</div>` : ''}</td><td><input type="checkbox" id="nt-${a.code}" data-notax="${a.code}"${a.noTax ? ' checked' : ''} aria-label="${esc(a.name)}は税なし"></td></tr>`).join('') + '</tbody>';
+      state.accts.map(a => `<tr><td class="num">${a.code}</td><td>${esc(a.name)}</td><td><input type="checkbox" id="nt-${a.code}" data-notax="${a.code}"${a.noTax ? ' checked' : ''} aria-label="${esc(a.name)}は税なし"></td></tr>${subRows(a.code, 'sub')}${subRows(a.code, 'bank')}`).join('') + '</tbody>';
   }
 
   /* ---------- CSV ---------- */
@@ -930,6 +936,13 @@ html, body { margin: 0; }
     e.target.value = '';
   });
 
+  $('accts').addEventListener('click', e => {
+    const b = e.target.closest('[data-rmattr]'); if (!b) return;
+    const lists = b.dataset.rmattr === 'sub' ? state.subs : state.banks, code = b.dataset.acct;
+    lists[code] = (lists[code] || []).filter(x => x.code !== b.dataset.code);
+    if (!lists[code].length) delete lists[code];
+    save(); render();
+  });
   $('accts').addEventListener('change', e => {
     const c = e.target.dataset.notax; if (!c) return;
     acct(c).noTax = e.target.checked; save(); render();
