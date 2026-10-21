@@ -303,6 +303,8 @@ html, body { margin: 0; }
     simple: ['シンプル（相手先・内容・金額）', { name: '現金出納帳', kinds: ['in', 'out'], cols: { partner: true }, inTypes: ['預金から引き出し', 'その他'], count: true, expPrint: false }],
     detail: ['詳しく（科目・部署・登録番号も入力）', { name: '小口現金出納帳', kinds: ['in', 'out'], cols: { partner: true, dept: true, acct: true, invNo: true }, inTypes: ['売上より', '預金から引き出し', 'その他'], count: true, expPrint: false }],
     exp: ['経費精算方式（立替をまとめて精算・精算書を印刷）', { name: '経費精算', kinds: ['in', 'exp'], cols: { partner: true }, inTypes: ['預金から引き出し', 'その他'], count: true, expPrint: true }],
+    custom_table: ['自由項目（表）（項目を決めて1行ずつ入れる。例：売上日報）', { name: '売上日報', type: 'custom', mode: 'table', fields: [{ key: 'f1', label: '日付', kind: 'date', required: true }, { key: 'f2', label: '内容', kind: 'text' }, { key: 'f3', label: '金額', kind: 'number', required: true }], journal: [], kinds: [], cols: {}, count: false, expPrint: false }],
+    custom_form: ['自由項目（月1回の用紙）（項目を決めて月に1回入れる。例：月次報告）', { name: '月次報告', type: 'custom', mode: 'form', fields: [{ key: 'f1', label: '売上高', kind: 'number', required: true }, { key: 'f2', label: '客数', kind: 'number' }, { key: 'f3', label: 'メモ', kind: 'text' }], journal: [], kinds: [], cols: {}, count: false, expPrint: false }],
     bank: ['通帳（預金）（手入力・CSVの読み込み・月末に通帳の残高と照合）', { name: '普通預金', type: 'bank', acct: '130', kinds: ['in', 'out'], cols: {}, inTypes: [], count: false, expPrint: false }],
   };
   const KIND_NAMES = { in: '入金', out: '出金', exp: '経費精算' };
@@ -534,6 +536,20 @@ html, body { margin: 0; }
     // 顧問先が選んだ科目がこの現金そのものなら、仕訳にならないので使わない
     const hintOf = l => l.acct && l.acct !== C ? l.acct : undefined;
     const info = l => join([l.dept && `部署 ${l.dept}`, l.acct && `顧問先の科目 ${l.acct}`, l.invNo, l.memo], '・');
+    // 自由項目：数字の項目ごとに、設定した借方・貸方・税区分で仕訳にする（片方が空なら仕訳の画面で選ぶ）
+    if (b.type === 'custom') {
+      const F = b.fields || [], df = F.find(f => f.kind === 'date');
+      for (const r of b.rows) for (const rule of b.journal || []) {
+        const f = F.find(x => x.key === rule.field), amt = Number(r.v?.[rule.field]) || 0;
+        if (!f || !amt || (!rule.dr && !rule.cr)) continue;
+        const tek = (rule.tekiyo || `${b.name} ${f.label}`).replace(/\{([^}]+)\}/g, (_, l) => { const x = F.find(y => y.label === l.trim()); const v = x ? r.v?.[x.key] : ''; return x?.kind === 'date' && v ? md(v) : String(v ?? ''); }).replace(/\s+/g, ' ').trim();
+        let dr = rule.dr || '', cr = rule.cr || '';
+        if (amt < 0) [dr, cr] = [cr, dr];
+        out.push({ key: `${r.id}:${f.key}`, date: (df && r.v?.[df.key]) || r.date, dr, cr, need: !dr ? 'dr' : !cr ? 'cr' : undefined, amt: Math.abs(amt), tax: rule.tax || '0',
+          desc: tek, tekiyo: tek, src: `${b.name}・${f.label}` });
+      }
+      return;
+    }
     // 通帳：入金は 預金／科目、出金は 科目／預金。税区分は覚えたもの（なければ対象外）。銀行コードは預金の側に付ける
     if (b.type === 'bank') {
       const CB = b.bankCode ? { code: String(b.bankCode), name: b.bankName || '' } : null;
@@ -820,7 +836,7 @@ html, body { margin: 0; }
   function renderBal() {
     if (CLIENT.std) {
       $('balTitle').textContent = `月末残高（${M}月${Number(END.slice(8))}日時点）`;
-      $('bal').innerHTML = CLIENT.books.map(b => {
+      $('bal').innerHTML = CLIENT.books.filter(b => b.type !== 'custom').map(b => {
         const cash = b.cashOpening + b.rows.reduce((t, r) => t + (r.in || 0) - (r.out || 0), 0) + b.countDiff;
         return `<div class="tile"><span>${esc(b.acct || CASH)} ${esc(b.name)}</span><b>${yen(cash)}</b><details><summary>計算のもと</summary><ul><li>前月末 ${yen(b.cashOpening)}円＋今月の入出金${b.countDiff ? `＋現金過不足 ${yen(b.countDiff)}円` : ''}</li></ul></details></div>`;
       }).join('');
@@ -1184,7 +1200,7 @@ html, body { margin: 0; }
     const chk = (i, f, on, label) => `<label class="check" for="cf-${i}-${f}"><input type="checkbox" id="cf-${i}-${f}" data-b="${i}" data-f="${f}"${on ? ' checked' : ''}>${label}</label>`;
     $('cfgEdit').innerHTML = `
       <p class="hint">顧問先のページに出す出納帳と、それぞれの入力のしかたを決めます。出納帳ごとに別々に提出します。変えたら「設定を保存する」を押してください。</p>
-      ${C.cashbooks.map((b, i) => { const bank = b.type === 'bank'; return `<fieldset class="cfg-book"><legend>${bank ? '通帳' : '出納帳'} ${i + 1}</legend>
+      ${C.cashbooks.map((b, i) => { const bank = b.type === 'bank'; if (b.type === 'custom') return customCfgHtml(b, i, C); return `<fieldset class="cfg-book"><legend>${bank ? '通帳' : '出納帳'} ${i + 1}</legend>
         <div class="fields">
           <label class="f" for="cf-${i}-name">名前<input type="text" id="cf-${i}-name" data-b="${i}" data-f="name" value="${esc(b.name)}"></label>
           <label class="f" for="cf-${i}-acct">会計ソフトの科目（この${bank ? '預金' : '現金'}）<select id="cf-${i}-acct" data-b="${i}" data-f="acct">${acctOptions(b.acct || CASH)}</select></label>
@@ -1220,6 +1236,37 @@ html, body { margin: 0; }
       <div class="foot"><span class="msg" id="cfMsg" role="status">${cfgDirty ? 'まだ保存していない変更があります。' : ''}</span><button type="button" class="btn" id="cf-save">設定を保存する</button></div>`;
   }
 
+  // 自由項目の帳簿の設定：項目（名前・種類・選択肢・必須）と、数字の項目ごとの仕訳
+  const FIELD_KINDS = { text: '文字', number: '数字', date: '日付', select: '選択肢' };
+  function customCfgHtml(b, i, C) {
+    const F = b.fields || [], jr = k => (b.journal || []).find(r => r.field === k) || {};
+    const acctOpt = sel => `<option value="">（取引ごとに選ぶ）</option>` + state.accts.map(a => `<option value="${a.code}"${a.code === sel ? ' selected' : ''}>${a.code} ${esc(a.name)}</option>`).join('');
+    const nums = F.filter(f => f.kind === 'number');
+    return `<fieldset class="cfg-book"><legend>自由項目 ${i + 1}</legend>
+      <div class="fields">
+        <label class="f" for="cf-${i}-name">名前<input type="text" id="cf-${i}-name" data-b="${i}" data-f="name" value="${esc(b.name)}"></label>
+        <label class="f" for="cf-${i}-mode">形<select id="cf-${i}-mode" data-b="${i}" data-f="mode"><option value="table"${b.mode !== 'form' ? ' selected' : ''}>表（1行ずつ足す）</option><option value="form"${b.mode === 'form' ? ' selected' : ''}>月1回の用紙</option></select></label>
+      </div>
+      <div class="table-box"><table class="accts"><thead><tr><th>項目名</th><th>種類</th><th>選択肢（カンマ区切り）</th><th>必須</th><th></th></tr></thead><tbody>
+        ${F.map(f => `<tr><td><input type="text" id="cf-${i}-${f.key}-label" data-b="${i}" data-fld="${f.key}:label" value="${esc(f.label)}" aria-label="項目名"></td>
+          <td><select id="cf-${i}-${f.key}-kind" data-b="${i}" data-fld="${f.key}:kind" aria-label="種類">${Object.entries(FIELD_KINDS).map(([k, l]) => `<option value="${k}"${f.kind === k ? ' selected' : ''}>${l}</option>`).join('')}</select></td>
+          <td>${f.kind === 'select' ? `<input type="text" id="cf-${i}-${f.key}-options" data-b="${i}" data-fld="${f.key}:options" value="${esc((f.options || []).join('、'))}" aria-label="選択肢">` : ''}</td>
+          <td><input type="checkbox" id="cf-${i}-${f.key}-required" data-b="${i}" data-fld="${f.key}:required"${f.required ? ' checked' : ''} aria-label="必須"></td>
+          <td><button type="button" class="link-btn danger" data-rmfld="${i}:${f.key}">消す</button></td></tr>`).join('')}
+      </tbody></table></div>
+      <div><button type="button" class="btn ghost" data-addfld="${i}">項目を追加</button></div>
+      <h3 style="margin:4px 0 0;font-size:14px">仕訳（数字の項目ごと）</h3>
+      <p class="hint">借方・貸方の片方を「取引ごとに選ぶ」にすると、仕訳の画面で選びます（選んだ科目は覚えます）。両方とも選ばない項目は、仕訳を出しません。マイナスの数字は借方と貸方を入れ替えます。摘要は {項目名} と書くと、その行の値が入ります（例：{日付} {内容}）。</p>
+      ${nums.length ? `<div class="table-box"><table class="accts"><thead><tr><th>項目</th><th>借方</th><th>貸方</th><th>税区分</th><th>摘要の書き方</th></tr></thead><tbody>
+        ${nums.map(f => { const r = jr(f.key); return `<tr><td>${esc(f.label)}</td>
+          <td><select id="cf-${i}-${f.key}-jdr" data-b="${i}" data-jr="${f.key}:dr" aria-label="借方">${acctOpt(r.dr)}</select></td>
+          <td><select id="cf-${i}-${f.key}-jcr" data-b="${i}" data-jr="${f.key}:cr" aria-label="貸方">${acctOpt(r.cr)}</select></td>
+          <td><select id="cf-${i}-${f.key}-jtax" data-b="${i}" data-jr="${f.key}:tax" aria-label="税区分">${Object.entries(TAXES).map(([k, t]) => `<option value="${k}"${k === (r.tax || '0') ? ' selected' : ''}>${t.label}</option>`).join('')}</select></td>
+          <td><input type="text" id="cf-${i}-${f.key}-jtek" data-b="${i}" data-jr="${f.key}:tekiyo" value="${esc(r.tekiyo || '')}" placeholder="${esc(b.name)} ${esc(f.label)}" aria-label="摘要の書き方"></td></tr>`; }).join('')}
+      </tbody></table></div>` : '<p class="hint">数字の項目がありません。</p>'}
+      <div class="foot"><span class="hint">ID：${esc(b.id)}</span>${C.cashbooks.length > 1 ? `<button type="button" class="link-btn danger" data-rmbook="${i}">この帳簿を外す</button>` : ''}</div>
+    </fieldset>`;
+  }
   const accessBooks = C => [...C.cashbooks, ...(C.payroll?.enabled ? [{ id: 'pay', name: C.payroll.name || '給与' }] : [])];
   function payCfgHtml(C) {
     // 料率・締め日などは顧問先も直せる設定（master の paySettings）にある
@@ -1257,8 +1304,8 @@ html, body { margin: 0; }
 
   async function saveCfg() {
     const m = $('cfMsg');
-    const bad = cfgDraft.cashbooks.find(b => !b.name.trim() || !b.kinds.length);
-    if (bad) { m.className = 'msg'; m.textContent = '出納帳ごとに、名前と記入の種類（1つ以上）を決めてください。'; return; }
+    const bad = cfgDraft.cashbooks.find(b => !b.name.trim() || (b.type === 'custom' ? !(b.fields || []).some(f => f.label.trim()) : !b.kinds.length));
+    if (bad) { m.className = 'msg'; m.textContent = '帳簿ごとに、名前と、記入の種類（自由項目は項目）を1つ以上決めてください。'; return; }
     // 外した出納帳は、使える出納帳の指定からも外す
     for (const ids of Object.values(cfgDraft.access || {})) for (let k = ids.length - 1; k >= 0; k--) if (!accessBooks(cfgDraft).some(b => b.id === ids[k])) ids.splice(k, 1);
     const none = Object.entries(cfgDraft.access || {}).find(([, ids]) => !ids.length);
@@ -1302,6 +1349,20 @@ html, body { margin: 0; }
       $('cfMsg').className = 'msg'; $('cfMsg').textContent = 'まだ保存していない変更があります。';
       return;
     }
+    if (t.dataset.fld || t.dataset.jr) {
+      const b = cfgDraft.cashbooks[Number(t.dataset.b)];
+      const [key, prop] = (t.dataset.fld || t.dataset.jr).split(':');
+      if (t.dataset.fld) {
+        const f = b.fields.find(x => x.key === key);
+        f[prop] = prop === 'required' ? t.checked : prop === 'options' ? list(t.value) : t.value;
+        if (prop === 'kind') { if (f.kind === 'select') f.options ||= []; renderCfg(); }
+      } else {
+        const r = (b.journal ||= []).find(x => x.field === key) || (b.journal.push({ field: key }), b.journal[b.journal.length - 1]);
+        r[prop] = t.value;
+      }
+      cfgDirty = true; $('cfMsg').className = 'msg'; $('cfMsg').textContent = 'まだ保存していない変更があります。';
+      return;
+    }
     if (t.dataset.email) {
       // 全部にチェック → 指定なし（あとで足した出納帳も使える）
       const em = t.dataset.email, ids = accessBooks(cfgDraft).map(b => b.id);
@@ -1331,6 +1392,17 @@ html, body { margin: 0; }
       let n = cfgDraft.cashbooks.length + 1, bid;
       do bid = 'b' + n++; while (cfgDraft.cashbooks.some(b => b.id === bid));
       cfgDraft.cashbooks.push({ ...JSON.parse(JSON.stringify(p)), id: bid, acct: p.acct || CASH, opening: 0, depts: [] });
+      cfgDirty = true; renderCfg(); return;
+    }
+    if (t.dataset.addfld !== undefined) {
+      const b = cfgDraft.cashbooks[Number(t.dataset.addfld)], F = b.fields ||= [];
+      let k = F.length + 1; while (F.some(f => f.key === 'f' + k)) k++;
+      F.push({ key: 'f' + k, label: `項目${F.length + 1}`, kind: 'text' });
+      cfgDirty = true; renderCfg(); return;
+    }
+    if (t.dataset.rmfld) {
+      const [bi, key] = t.dataset.rmfld.split(':'), b = cfgDraft.cashbooks[Number(bi)];
+      b.fields = b.fields.filter(f => f.key !== key); b.journal = (b.journal || []).filter(r => r.field !== key);
       cfgDirty = true; renderCfg(); return;
     }
     if (t.dataset.rmbook !== undefined) {

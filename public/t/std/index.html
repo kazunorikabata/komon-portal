@@ -276,6 +276,7 @@ td.partner { min-width: 7em; }
       <p id="ledgerHint"></p>
     </div>
     <div id="payBox" hidden style="display:grid;gap:14px"></div>
+    <div id="customBox" hidden style="display:grid;gap:14px"></div>
     <div class="entry" id="cashPanel">
       <h3 id="cashPanelTitle">記入する</h3>
       <div class="kind-btns" id="kindBtns"></div>
@@ -494,8 +495,10 @@ td.partner { min-width: 7em; }
     if (view.mode === 'year') { renderYear(); return; }
     $('ledgerTitle').textContent = `${b.name}　${monthName(view.month)}${b.isPay ? '支給' : ''}`;
     $('payBox').hidden = !b.isPay;
-    $('cashPanel').hidden = $('tableBox').hidden = !!b.isPay;
+    $('customBox').hidden = !isCustom(b);
+    $('cashPanel').hidden = $('tableBox').hidden = !!b.isPay || isCustom(b);
     if (b.isPay) { $('ledgerHint').textContent = ''; renderPay(); renderSubmit(); return; }
+    if (isCustom(b)) { $('ledgerHint').textContent = b.mode === 'form' ? '月に1回、各項目を入れて保存してください。' : '1行ずつ追加してください。'; renderCustom(); renderSubmit(); return; }
     $('ledgerHint').textContent = b.kinds.length > 1 ? '下のボタンから記入します。' : '';
     renderLists(); renderCashPanel(); renderTable(); renderSubmit();
   }
@@ -513,7 +516,9 @@ td.partner { min-width: 7em; }
   function renderStatus() {
     const b = BK(), m = view.month;
     const rows = rowsOf(b.id, m);
-    if (b.isPay) {
+    if (isCustom(b)) {
+      $('chips').innerHTML = `<span class="chip">${b.mode === 'form' ? '入力' : '行'} <b>${b.mode === 'form' ? (rows.length ? '済' : '未') : rows.length}</b></span>` + customSums(b, rows).slice(0, 4).map(([f, v]) => `<span class="chip">${esc(f.label)} <b>${yen(v)}</b></span>`).join('');
+    } else if (b.isPay) {
       const t = payTotals(m);
       $('chips').innerHTML = `<span class="chip">人数 <b>${t.count}</b></span><span class="chip">総支給額 <b>${yen(t.gross)}</b></span><span class="chip">控除の合計 <b>${yen(t.gross - t.net)}</b></span><span class="chip">差引支給額 <b>${yen(t.net)}</b></span>`;
     } else
@@ -845,6 +850,7 @@ td.partner { min-width: 7em; }
   const csvFields = b => isBank(b) ? CSV_BASE : [...CSV_BASE.slice(0, 3), ...CSV_CASH, ...CSV_BASE.slice(3)];
   function guessMap(head, b) {
     const H = head.map(h => h.replace(/\s/g, ''));
+    if (isCustom(b)) return Object.fromEntries(cfields(b).map(f => { const l = f.label.replace(/\s/g, ''); let i = H.findIndex(h => h === l); if (i < 0) i = H.findIndex(h => h && (h.includes(l) || l.includes(h))); return [f.key, i]; }));
     const find = (re, not) => H.findIndex(h => re.test(h) && !(not && not.test(h)));
     const map = {};
     map.date = find(/日付|取引日|年月日|勘定日|日時|^月日$/);
@@ -873,7 +879,10 @@ td.partner { min-width: 7em; }
       const rows = parseCsvText(text.replace(/^\uFEFF/, ''));
       // 見出しの行：「日付」と「残高・金額・入金・出金」などを含む行
       const ns = c => c.replace(/\s/g, '');
-      let hi = rows.slice(0, 20).findIndex(r => r.some(c => /日付|取引日|年月日|^月日$/.test(ns(c))) && r.some(c => /残高|金額|入金|出金|支払|預|収入|支出/.test(ns(c))));
+      // 自由項目は、項目名を2つ以上含む行を見出しにする
+      const labels = isCustom(BK()) ? cfields(BK()).map(f => f.label.replace(/\s/g, '')) : null;
+      let hi = labels ? rows.slice(0, 20).findIndex(r => r.filter(c => labels.includes(ns(c))).length >= Math.min(2, labels.length))
+        : rows.slice(0, 20).findIndex(r => r.some(c => /日付|取引日|年月日|^月日$/.test(ns(c))) && r.some(c => /残高|金額|入金|出金|支払|預|収入|支出/.test(ns(c))));
       const head = hi >= 0 ? rows[hi].map(c => c.trim()) : rows[0].map((_, i) => `${i + 1}列目`);
       const body = rows.slice(hi >= 0 ? hi + 1 : 0);
       let map = guessMap(head, BK());
@@ -1207,6 +1216,7 @@ tfoot td { font-weight: bold; }
       view.reqForm = false; save(); render(); return;
     }
     if (t !== 'doSubmit') return;
+    if (isCustom(b) && !rowsOf(b.id, m).length) { view.submitStep = null; render(); $('ledgerHint').textContent = 'まだ入力がありません。入力してから提出してください。'; return; }
     if (b.isPay && !Object.keys(state.pay[m]?.rows || {}).length) { view.submitStep = null; render(); $('ledgerHint').textContent = '給与を払う人がいません。表に入力してから提出してください。'; return; }
     if (view.submitStep === 'bank') {
       const k = updateBankCheck();
@@ -1700,12 +1710,204 @@ th, td { border: 1px solid #000; padding: 1mm 1.5mm; } th { background: #eee; fo
     }
   });
 
+  /* ---------- 自由項目（事務所が決めた項目の表・月1回の用紙） ---------- */
+
+  const isCustom = b => b?.type === 'custom';
+  const cfields = b => b.fields || [];
+  const dateField = b => cfields(b).find(f => f.kind === 'date');
+  const FORM_ID = 'form';
+  // 数字の項目の合計
+  const customSums = (b, rows) => cfields(b).filter(f => f.kind === 'number').map(f => [f, rows.reduce((t, r) => t + (Number(r.v?.[f.key]) || 0), 0)]);
+  const showVal = (f, v) => v === undefined || v === '' ? '' : f.kind === 'number' ? yen(v) : f.kind === 'date' ? String(v).replace(/-/g, '/') : esc(v);
+
+  function fieldInput(f, v, pfx, dis) {
+    const id = `${pfx}-${f.key}`, a = ` id="${id}" data-cf="${f.key}"${dis}`;
+    if (f.kind === 'select') return `<select${a}><option value=""></option>${(f.options || []).map(o => `<option${o === v ? ' selected' : ''}>${esc(o)}</option>`).join('')}</select>`;
+    if (f.kind === 'number') return `<input type="number" step="any" inputmode="decimal"${a} value="${v ?? ''}">`;
+    if (f.kind === 'date') return `<input type="date"${a} value="${v || ''}"${dateAttrs()}>`;
+    return `<input type="text"${a} value="${esc(v ?? '')}">`;
+  }
+  function readFields(b) {
+    const v = {};
+    for (const f of cfields(b)) {
+      const el = document.querySelector(`#customBox [data-cf="${f.key}"]`); if (!el) continue;
+      const t = el.value.trim();
+      if (t === '') continue;
+      v[f.key] = f.kind === 'number' ? Number(t.replace(/,/g, '')) : t;
+    }
+    return v;
+  }
+  // 入力の確かめ：必須の項目・数字・日付（その月の中）
+  function checkFields(b, v) {
+    for (const f of cfields(b)) {
+      if (f.required && (v[f.key] === undefined || v[f.key] === '')) return `「${f.label}」を入力してください。`;
+      if (f.kind === 'number' && v[f.key] !== undefined && !isFinite(v[f.key])) return `「${f.label}」は数字で入力してください。`;
+      if (f.kind === 'date' && v[f.key] && !String(v[f.key]).startsWith(view.month)) return `「${f.label}」は${monthName(view.month)}の中の日付にしてください。`;
+    }
+    return '';
+  }
+
+  function renderCustom() {
+    const b = BK(), m = view.month, lock = locked(), dis = lock ? ' disabled' : '', F = cfields(b), rows = rowsOf(b.id, m), box = $('customBox');
+    if (!F.length) { box.innerHTML = '<p class="empty">事務所で項目がまだ決められていません。</p>'; return; }
+    if (view.kind === 'ccsv') { renderCustomCsv(); return; }
+    // 月1回の用紙
+    if (b.mode === 'form') {
+      const r = rows.find(x => x.id.startsWith(FORM_ID)) || rows[0], v = view.draft || r?.v || {};
+      box.innerHTML = `<form class="entry" id="cfForm" novalidate>
+        <h3>${lock ? 'この月は提出済みのため直せません' : r ? '保存した内容（直したら保存してください）' : '入力する'}</h3>
+        <div class="fields">${F.map(f => `<label class="f" for="cu-${f.key}">${esc(f.label)}${f.required ? '' : '（任意）'}${fieldInput(f, v[f.key], 'cu', dis)}</label>`).join('')}</div>
+        <div class="form-foot"><span class="msg" id="cuMsg" role="status"></span>${lock ? '' : '<button type="submit" class="btn">保存する</button>'}</div>
+      </form>`;
+      return;
+    }
+    // 表：上に記入欄、下に一覧と合計
+    const editing = view.editing && rows.find(x => x.id === view.editing);
+    const v = view.draft || editing?.v || {};
+    const sums = customSums(b, rows);
+    box.innerHTML = `${lock ? '' : `<form class="entry" id="cfForm" novalidate>
+        <h3>${editing ? '行を直す' : '行を追加する'}</h3>
+        <div class="fields">${F.map(f => `<label class="f" for="cu-${f.key}">${esc(f.label)}${f.required ? '' : '（任意）'}${fieldInput(f, v[f.key] ?? (f.kind === 'date' && !editing ? defDate() : undefined), 'cu', '')}</label>`).join('')}</div>
+        <div class="form-foot"><span class="msg" id="cuMsg" role="status"></span>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">${editing ? '<button type="button" class="btn ghost" id="cuCancel">やめる</button>' : '<button type="button" class="btn ghost" id="cuCsv">CSVを読み込む</button>'}<button type="submit" class="btn">${editing ? '直した内容で保存' : '追加する'}</button></div></div>
+      </form>`}
+      <div class="table-box"><table><thead><tr>${F.map(f => `<th${f.kind === 'number' ? ' class="num"' : ''}>${esc(f.label)}</th>`).join('')}<th></th></tr></thead><tbody>
+        ${rows.map(r => `<tr${view.editing === r.id ? ' style="background:var(--accent-soft)"' : ''}>${F.map(f => `<td${f.kind === 'number' ? ' class="num"' : f.kind === 'date' ? ' class="date"' : ''}>${showVal(f, r.v?.[f.key])}</td>`).join('')}
+          <td>${lock ? '' : view.confirmDel === r.id ? `<span class="confirm">消しますか？<button type="button" class="link-btn danger" data-cudelok="${r.id}">消す</button><button type="button" class="link-btn" data-cudelno="1">やめる</button></span>`
+            : `<div class="row-actions"><button type="button" class="link-btn" data-cuedit="${r.id}">直す</button><button type="button" class="link-btn danger" data-cudel="${r.id}">消す</button></div>`}</td></tr>`).join('')
+          || `<tr><td colspan="${F.length + 1}" class="empty">この月の行はまだありません。</td></tr>`}
+        ${sums.length && rows.length ? `<tr class="total">${F.map((f, i) => { const s2 = sums.find(([x]) => x.key === f.key); return `<td${s2 ? ' class="num"' : ''}>${s2 ? yen(s2[1]) : i === 0 ? '合計' : ''}</td>`; }).join('')}<td></td></tr>` : ''}
+      </tbody></table></div>`;
+  }
+
+  $('customBox').addEventListener('submit', e => {
+    if (e.target.id !== 'cfForm') return;
+    e.preventDefault();
+    if (locked()) return;
+    const b = BK(), m = view.month, v = readFields(b), why = checkFields(b, v);
+    if (why) { const el = $('cuMsg'); el.className = 'msg'; el.textContent = why; view.draft = v; return; }
+    const df = dateField(b), list = state.rows[b.id] ||= [];
+    const date = df && v[df.key] ? v[df.key] : monthEnd(m);
+    if (b.mode === 'form') {
+      const i = list.findIndex(r => r.date.startsWith(m) && r.id.startsWith(FORM_ID));
+      const rec = { id: `${FORM_ID}-${m}`, date, v };
+      if (i >= 0) list[i] = rec; else list.push(rec);
+    } else {
+      const rid = view.editing || id(), i = list.findIndex(r => r.id === rid), rec = { id: rid, date, v };
+      if (i >= 0) list[i] = rec; else list.push(rec);
+    }
+    if (reopened(m, b.id)) addLog(m, `${view.editing ? '修正' : '保存'}：${b.name}`);
+    view.editing = null; view.draft = null;
+    save(); render();
+    const el = $('cuMsg'); if (el) { el.className = 'msg ok'; el.textContent = '保存しました。'; }
+  });
+  $('customBox').addEventListener('click', e => {
+    const t = e.target, b = BK(), list = state.rows[b.id] || [];
+    if (t.id === 'cuCsv') { view.kind = 'ccsv'; view.csv = null; view.csvPick = null; renderCustom(); return; }
+    if (t.id === 'cuCancel') { view.editing = null; view.draft = null; renderCustom(); return; }
+    if (locked()) return;
+    if (t.dataset.cuedit) { view.editing = t.dataset.cuedit; view.draft = null; renderCustom(); $('cfForm')?.scrollIntoView({ block: 'nearest' }); return; }
+    if (t.dataset.cudel) { view.confirmDel = t.dataset.cudel; renderCustom(); return; }
+    if (t.dataset.cudelno) { view.confirmDel = null; renderCustom(); return; }
+    if (t.dataset.cudelok) {
+      state.rows[b.id] = list.filter(r => r.id !== t.dataset.cudelok);
+      if (reopened(view.month, b.id)) addLog(view.month, `削除：${b.name}`);
+      view.confirmDel = null; save(); render();
+    }
+  });
+
+  /* 自由項目のCSVの読み込み（列を項目に割り当てる） */
+  function customCsvRows() {
+    const b = BK(), c = view.csv, F = cfields(b), df = dateField(b);
+    let last = null; const prev = {};
+    const ditto = v => /^(〃|″|"|同上|々)$/.test(v.normalize('NFKC').trim());
+    const have = new Set((state.rows[b.id] || []).map(r => JSON.stringify(r.v)));
+    return c.body.map((r, i) => {
+      const v = {};
+      for (const f of F) {
+        const ci = c.map[f.key]; if (!(ci >= 0)) continue;
+        let t = String(r[ci] ?? '').trim();
+        if (t && ditto(t)) t = prev[f.key] || ''; else if (t) prev[f.key] = t;
+        if (t === '') continue;
+        if (f.kind === 'number') { const n = parseAmt(t); if (n !== null) v[f.key] = n; }
+        else if (f.kind === 'date') { const d = parseDate(t); if (d) v[f.key] = d; }
+        else v[f.key] = t;
+      }
+      // 日付が空の行は上の行と同じ日付
+      if (df) { if (v[df.key]) last = v[df.key]; else if (last && Object.keys(v).length) v[df.key] = last; }
+      const date = df ? v[df.key] : null, month = date ? date.slice(0, 7) : view.month;
+      let st = 'ok';
+      if (!Object.keys(v).length || !F.some(f => f.kind === 'number' && v[f.key])) st = 'noamt';
+      else if (df && !date) st = 'nodate';
+      else if (F.some(f => f.required && v[f.key] === undefined)) st = 'missing';
+      else if (lockedBook(month, b.id)) st = 'locked';
+      else if (have.has(JSON.stringify(v))) st = 'dup';
+      return { i, v, month, date, st };
+    }).filter(x => x.st !== 'noamt');
+  }
+  function renderCustomCsv() {
+    const b = BK(), c = view.csv, F = cfields(b), box = $('customBox');
+    if (!c) {
+      box.innerHTML = `<div class="entry"><h3>CSVを読み込む</h3><p style="margin:0;font-size:13px">CSVの列を「${F.map(f => f.label).join('・')}」に割り当てて読み込みます。${dateField(b) ? '日付ごとに、それぞれの月に入ります。' : `${monthName(view.month)}の行として入ります。`}同じ内容の行は二重に入りません。</p>
+        <label class="f" for="cu-file">CSVファイル<input type="file" id="cu-file" accept=".csv,text/csv,text/plain"></label><span class="msg" id="cuMsg" role="status"></span>
+        <div class="form-foot"><span></span><button type="button" class="btn ghost" id="cuCsvCancel">やめる</button></div></div>`;
+      return;
+    }
+    const rows = customCsvRows();
+    if (!view.csvPick) view.csvPick = new Set(rows.filter(r => r.st === 'ok').map(r => r.i));
+    const ok = rows.filter(r => r.st === 'ok' && view.csvPick.has(r.i));
+    const ST = { ...CSV_ST, missing: '必須の項目が空' };
+    const opt = f => `<select id="cu-map-${f.key}" data-cumap="${f.key}"><option value="-1">（使わない）</option>${c.head.map((h, i) => `<option value="${i}"${c.map[f.key] === i ? ' selected' : ''}>${esc(h || `${i + 1}列目`)}${c.body[0]?.[i] ? `（例：${esc(String(c.body[0][i]).trim().slice(0, 14))}）` : ''}</option>`).join('')}</select>`;
+    box.innerHTML = `<div class="entry"><h3>CSVを読み込む</h3><p style="margin:0;font-size:13px"><b>${esc(c.name)}</b>：${c.body.length}行。列の割り当てが違っていたら直してください。</p>
+      <div class="fields">${F.map(f => `<label class="f" for="cu-map-${f.key}">${esc(f.label)}${opt(f)}</label>`).join('')}</div>
+      <div class="table-box" style="max-height:420px;overflow:auto"><table class="lines" style="min-width:600px"><thead><tr><th></th>${F.map(f => `<th${f.kind === 'number' ? ' class="num"' : ''}>${esc(f.label)}</th>`).join('')}<th></th></tr></thead><tbody>
+        ${rows.map(r => `<tr${r.st !== 'ok' ? ' style="color:var(--ink-soft)"' : ''}><td><input type="checkbox" data-cupick="${r.i}"${r.st === 'ok' && view.csvPick.has(r.i) ? ' checked' : ''}${r.st !== 'ok' ? ' disabled' : ''} aria-label="${r.i + 1}行目を取り込む"></td>${F.map(f => `<td${f.kind === 'number' ? ' class="num"' : ''}>${showVal(f, r.v[f.key])}</td>`).join('')}<td style="font-size:12px">${ST[r.st] || ''}</td></tr>`).join('') || `<tr><td colspan="${F.length + 2}" class="empty">読み込める行がありません。</td></tr>`}
+      </tbody></table></div>
+      <div class="form-foot"><span class="msg" id="cuMsg" role="status"></span><div style="display:flex;gap:8px"><button type="button" class="btn ghost" id="cuCsvCancel">やめる</button><button type="button" class="btn" id="cuImport"${ok.length ? '' : ' disabled'}>${ok.length}件を取り込む</button></div></div></div>`;
+  }
+  $('customBox').addEventListener('change', async e => {
+    const t = e.target;
+    if (t.id === 'cu-file' && t.files[0]) {
+      try { view.csv = await readCsvFile(t.files[0]); view.csvPick = null; renderCustomCsv(); }
+      catch (err) { $('cuMsg').textContent = 'CSVを読めませんでした。ファイルを確かめてください。'; }
+      return;
+    }
+    if (t.dataset.cumap) {
+      view.csv.map[t.dataset.cumap] = Number(t.value); view.csvPick = null;
+      try { localStorage.setItem(KEY + ':csvmap:' + BK().id, JSON.stringify({ sig: view.csv.sig, map: view.csv.map })); } catch (err) {}
+      renderCustomCsv(); return;
+    }
+    if (t.dataset.cupick) { const i = Number(t.dataset.cupick); if (t.checked) view.csvPick.add(i); else view.csvPick.delete(i); renderCustomCsv(); }
+  });
+  $('customBox').addEventListener('click', e => {
+    const t = e.target;
+    if (t.id === 'cuCsvCancel') { view.kind = null; view.csv = null; view.csvPick = null; renderCustom(); return; }
+    if (t.id !== 'cuImport') return;
+    const b = BK(), df = dateField(b), list = state.rows[b.id] ||= [];
+    const take = customCsvRows().filter(r => r.st === 'ok' && view.csvPick.has(r.i));
+    for (const r of take) list.push({ id: id(), date: df ? r.date : monthEnd(view.month), v: r.v });
+    view.kind = null; view.csv = null; view.csvPick = null;
+    save(); render();
+  });
+
   /* ---------- 年間一覧 ---------- */
 
   function renderYear() {
     const b = BK(), fy = Number(CONFIG.fyStart) || 4;
     const [y, mo] = view.month.split('-').map(Number), start = ym(mo >= fy ? y : y - 1, fy);
     const months = Array.from({ length: 12 }, (_, i) => shiftMonth(start, i));
+    if (isCustom(b)) {
+      const nf = cfields(b).filter(f => f.kind === 'number').slice(0, 4);
+      let h = `<div class="ledger-head"><h2>${esc(b.name)}　${monthName(start)}〜${monthName(months[11])}</h2><p>月を押すと、その月が開きます。</p></div>
+        <div class="table-box"><table><thead><tr><th>月</th><th>状態</th><th class="num">行</th>${nf.map(f => `<th class="num">${esc(f.label)}</th>`).join('')}</tr></thead><tbody>`;
+      for (const m of months) {
+        const st = bookStatus(m, b), rows = rowsOf(b.id, m), future = m > thisYM, sums = customSums(b, rows);
+        h += `<tr class="clickable${m === thisYM ? ' current' : ''}" data-month="${m}" tabindex="0"><td>${Number(m.slice(5))}月${m === thisYM ? '（今月）' : ''}</td><td><span class="pill ${st.cls}">${st.label}</span></td><td class="num">${future ? '' : rows.length}</td>
+          ${nf.map(f => `<td class="num">${future ? '' : yen(sums.find(([x]) => x.key === f.key)?.[1] || 0)}</td>`).join('')}</tr>`;
+      }
+      $('yearView').innerHTML = h + '</tbody></table></div>';
+      return;
+    }
     if (b.isPay) {
       let h = `<div class="ledger-head"><h2>${esc(b.name)}　${monthName(start)}〜${monthName(months[11])}</h2><p>月を押すと、その月の給与が開きます。従業員ごとの1年分は「賃金台帳」で見られます。</p></div>
         <div class="table-box"><table><thead><tr><th>月</th><th>状態</th><th class="num">人数</th><th class="num">総支給額</th><th class="num">控除の合計</th><th class="num">差引支給額</th></tr></thead><tbody>`;
