@@ -608,7 +608,7 @@ td.partner { min-width: 7em; }
     $('cashPanelTitle').textContent = lock ? 'この月は提出済みのため記入できません' : view.editing ? '記入を直す' : '記入する';
     const KN = isBank(b) ? BANK_KINDS : KINDS;
     $('kindBtns').innerHTML = b.kinds.filter(k => KN[k]).map(k => `<button type="button" class="kind-btn" data-kind="${k}" id="kb-${k}" aria-pressed="${view.kind === k}"${lock || (view.editing && view.kind !== k) ? ' disabled' : ''}><b>${KN[k][0]}</b><span>${KN[k][1]}</span></button>`).join('')
-      + (isBank(b) && !lock && !view.editing ? `<button type="button" class="kind-btn" data-kind="csv" id="kb-csv" aria-pressed="${view.kind === 'csv'}"><b>CSVを読み込む</b><span>ネットバンキングの明細（CSV）から</span></button>` : '');
+      + (!lock && !view.editing ? `<button type="button" class="kind-btn" data-kind="csv" id="kb-csv" aria-pressed="${view.kind === 'csv'}"><b>CSVを読み込む</b><span>${isBank(b) ? 'ネットバンキングの明細（CSV）から' : 'Excelの出納帳などをCSVにしたものから'}</span></button>` : '');
     const f = $('cashForm');
     f.hidden = lock || !view.kind;
     if (f.hidden) { f.innerHTML = ''; return; }
@@ -817,6 +817,15 @@ td.partner { min-width: 7em; }
       const e = m[1], n = Number(m[2]);
       y = e === 'H' || e === '平成' ? 1988 + n : e ? 2018 + n : n >= 20 ? 2000 + n : 2018 + n;
       [mo, d] = [m[3], m[4]];
+    } else if ((m = t.match(/^(\d{5})(\.\d+)?$/)) && Number(m[1]) > 30000 && Number(m[1]) < 70000) {
+      // Excelの日付の数字（1900年1月0日からの日数）
+      const dt = new Date(1899, 11, 30 + Number(m[1]));
+      [y, mo, d] = [dt.getFullYear(), dt.getMonth() + 1, dt.getDate()];
+    } else if ((m = t.match(/^(\d{1,2})[\/\-.月](\d{1,2})日?$/))) {
+      // 年のない「4/1」「4月1日」は、開いている月に近い年にする
+      [mo, d] = [m[1], m[2]];
+      const [vy, vm] = view.month.split('-').map(Number);
+      y = Number(mo) - vm > 6 ? vy - 1 : vm - Number(mo) > 6 ? vy + 1 : vy;
     } else return null;
     const dt = new Date(Number(y), Number(mo) - 1, Number(d));
     if (dt.getMonth() !== Number(mo) - 1) return null;
@@ -830,17 +839,30 @@ td.partner { min-width: 7em; }
     return isFinite(n) ? Math.round(n) : null;
   }
   // 列の見出しから、どの列が何かを決める
-  const CSV_FIELDS = [['date', '日付'], ['desc', '摘要'], ['desc2', '摘要（2つ目・任意）'], ['in', '入金額'], ['out', '出金額'], ['amt', '金額（＋入金・−出金）'], ['bal', '残高']];
-  function guessMap(head) {
-    const find = (re, not) => head.findIndex(h => re.test(h) && !(not && not.test(h)));
+  const CSV_BASE = [['date', '日付'], ['desc', '摘要'], ['desc2', '摘要（2つ目・任意）'], ['in', '入金額'], ['out', '出金額'], ['amt', '金額（＋入金・−出金）'], ['bal', '残高']];
+  // 現金出納帳は、相手先・部署・科目・税率・インボイスなども読む
+  const CSV_CASH = [['partner', '相手先・支払先'], ['dept', '部署'], ['acct', '科目'], ['rate', '税率（8なら軽減）'], ['inv', 'インボイスあり（✓など）'], ['invNo', '登録番号'], ['memo', 'メモ']];
+  const csvFields = b => isBank(b) ? CSV_BASE : [...CSV_BASE.slice(0, 3), ...CSV_CASH, ...CSV_BASE.slice(3)];
+  function guessMap(head, b) {
+    const H = head.map(h => h.replace(/\s/g, ''));
+    const find = (re, not) => H.findIndex(h => re.test(h) && !(not && not.test(h)));
     const map = {};
-    map.date = find(/日付|取引日|年月日|勘定日|日時/);
+    map.date = find(/日付|取引日|年月日|勘定日|日時|^月日$/);
     map.desc = find(/^摘要$|摘要|お取引内容|取引内容|お取扱内容|内容|明細/, /摘要コード|区分/);
-    map.desc2 = head.findIndex((h, i) => i !== map.desc && /摘要|内容|備考|メモ|依頼人|振込人/.test(h) && !/コード|区分/.test(h));
-    map.in = find(/入金|お預.?り|預入|受入|入金額/);
-    map.out = find(/出金|お支払|お引出|払出|引出|支払/);
+    map.desc2 = isBank(b) ? H.findIndex((h, i) => i !== map.desc && /摘要|内容|備考|メモ|依頼人|振込人/.test(h) && !/コード|区分/.test(h)) : -1;
+    map.in = find(/入金|お預.?り|預入|受入|入金額|収入/);
+    map.out = find(/出金|お支払|お引出|払出|引出|^支払$|支払金額|支出/);
     map.bal = find(/残高/);
     map.amt = map.in < 0 && map.out < 0 ? find(/金額/) : -1;
+    if (!isBank(b)) {
+      map.partner = find(/支払先|相手先|取引先|支払い先|相手/);
+      map.dept = find(/部署|部門/);
+      map.acct = find(/科目/);
+      map.rate = find(/税率|軽減/);
+      map.invNo = find(/登録番号|インボイス.*(№|No|NO|番号)/);
+      map.inv = H.findIndex((h, i) => i !== map.invNo && /インボイス|適格/.test(h));
+      map.memo = find(/メモ|備考/);
+    }
     return map;
   }
   function readCsvFile(file) {
@@ -850,10 +872,11 @@ td.partner { min-width: 7em; }
       try { text = new TextDecoder('utf-8', { fatal: true }).decode(u); } catch (e) { text = new TextDecoder('shift_jis').decode(u); }
       const rows = parseCsvText(text.replace(/^\uFEFF/, ''));
       // 見出しの行：「日付」と「残高・金額・入金・出金」などを含む行
-      let hi = rows.slice(0, 20).findIndex(r => r.some(c => /日付|取引日|年月日/.test(c)) && r.some(c => /残高|金額|入金|出金|支払|預/.test(c)));
+      const ns = c => c.replace(/\s/g, '');
+      let hi = rows.slice(0, 20).findIndex(r => r.some(c => /日付|取引日|年月日|^月日$/.test(ns(c))) && r.some(c => /残高|金額|入金|出金|支払|預|収入|支出/.test(ns(c))));
       const head = hi >= 0 ? rows[hi].map(c => c.trim()) : rows[0].map((_, i) => `${i + 1}列目`);
       const body = rows.slice(hi >= 0 ? hi + 1 : 0);
-      let map = guessMap(head);
+      let map = guessMap(head, BK());
       const sig = head.join('|');
       try { const saved = JSON.parse(localStorage.getItem(KEY + ':csvmap:' + BK().id) || 'null'); if (saved && saved.sig === sig) map = saved.map; } catch (e) {}
       return { name: file.name, head, body, sig, map };
@@ -867,29 +890,59 @@ td.partner { min-width: 7em; }
     const keyOf = (date, kind, amt, desc) => `${date}|${kind}|${amt}|${normDesc(desc)}`;
     const have = {};
     for (const r of state.rows[b.id] || []) { const k = keyOf(r.date, r.in ? 'in' : 'out', r.in || r.out, r.desc); have[k] = (have[k] || 0) + 1; }
+    // Excelの出納帳：日付が空の行は上の行と同じ日付、「〃」は上の行と同じ内容
+    let lastDate = null;
+    const prev = {}, ditto = v => /^(〃|″|"|同上|々)$/.test(v.normalize('NFKC').trim());
+    const val = (r, k) => { let v = cell(r, k); if (v && ditto(v)) v = prev[k] || ''; else if (v) prev[k] = v; return v; };
     return c.body.map((r, i) => {
-      const date = parseDate(cell(r, 'date'));
+      const rawDate = cell(r, 'date');
+      let date = parseDate(rawDate);
+      if (date) lastDate = date; else if (!rawDate && lastDate) date = lastDate;
       let inn = parseAmt(cell(r, 'in')), out = parseAmt(cell(r, 'out'));
       const amt = parseAmt(cell(r, 'amt'));
       if (amt !== null && inn === null && out === null) { if (amt > 0) inn = amt; else if (amt < 0) out = -amt; }
-      const desc = [cell(r, 'desc'), cell(r, 'desc2')].filter(Boolean).join(' ').replace(/\s+/g, ' ');
+      const desc = [val(r, 'desc'), val(r, 'desc2')].filter(Boolean).join(' ').replace(/\s+/g, ' ');
       const bal = parseAmt(cell(r, 'bal'));
       const kind = inn ? 'in' : out ? 'out' : null;
+      const ex = isBank(b) ? {} : cashExtras(r, val, cell);
       let st = 'ok';
       if (!date) st = 'nodate';
       else if (!kind) st = 'noamt';
       else if (lockedBook(date.slice(0, 7), b.id)) st = 'locked';
       else { const k = keyOf(date, kind, inn || out, desc); if (have[k] > 0) { have[k]--; st = 'dup'; } }
-      return { i, date, kind, amt: inn || out, desc, bal, st };
+      return { i, date, kind, amt: inn || out, desc, bal, st, ...ex };
     }).filter(x => x.st !== 'noamt' || x.date);
   }
   const normDesc = d => String(d || '').normalize('NFKC').replace(/\s/g, '');
+  // 科目：「736 広告宣伝費」「交際接待費」など。名前が科目一覧と合えばその科目、なければコード、どちらもなければメモに残す
+  function matchAcct(t) {
+    t = String(t || '').normalize('NFKC').trim();
+    if (!t) return { acct: '' };
+    const code = (t.match(/^\d+/) || [''])[0], name = normDesc(t.replace(/^[\d\-]+/, ''));
+    const byName = name && (CONFIG.accts.find(a => normDesc(a.name) === name) || CONFIG.accts.find(a => normDesc(a.name).includes(name) || name.includes(normDesc(a.name))));
+    if (byName) return { acct: byName.code };
+    if (!name && code && CONFIG.accts.some(a => a.code === code)) return { acct: code };
+    return { acct: '', note: `科目：${t}` };
+  }
+  function cashExtras(r, val, cell) {
+    const f = csvFields(BK()).map(([k]) => k), m = view.csv.map, used = k => f.includes(k) && m[k] >= 0;
+    const partner = val(r, 'partner'), dept = val(r, 'dept');
+    const a = matchAcct(val(r, 'acct'));
+    const rt = String(cell(r, 'rate')).normalize('NFKC');
+    const rate = /8/.test(rt) ? '8' : /対象外|非課税|不課税|^0$/.test(rt) ? '0' : '10';
+    const invNo = normInvNo(val(r, 'invNo'));
+    const mark = /✓|✔|〇|○|◯|有|あり|レ|^1$|^true$/i.test(String(cell(r, 'inv')).normalize('NFKC'));
+    // インボイスの列を割り当てたときだけ、印のない行を「インボイスなし」にする
+    const noinv = rate !== '0' && used('inv') && !mark && !/^T\d{13}$/.test(invNo);
+    const memo = [val(r, 'memo'), a.note].filter(Boolean).join('・');
+    return { partner, dept, acct: a.acct, rate, noinv, invNo: /^T\d{13}$/.test(invNo) ? invNo : '', memo };
+  }
   const CSV_ST = { ok: '', dup: 'すでにある（重複）', locked: '提出済みの月', nodate: '日付が読めない', noamt: '金額がない' };
 
   function renderCsv() {
     const f = $('cashForm'), c = view.csv;
     if (!c) {
-      f.innerHTML = `<p style="margin:0;font-size:13px">ネットバンキングからダウンロードした入出金明細のCSVを選んでください。何か月分でも、それぞれの月に入ります。同じ取引は二重に入りません。</p>
+      f.innerHTML = `<p style="margin:0;font-size:13px">${isBank(BK()) ? 'ネットバンキングからダウンロードした入出金明細' : 'Excelなどで作った出納帳をCSVで保存したもの'}のCSVを選んでください。何か月分でも、それぞれの月に入ります。同じ取引は二重に入りません。</p>
         <label class="f" for="csv-file">CSVファイル<input type="file" id="csv-file" accept=".csv,text/csv,text/plain"></label>
         <span class="msg" id="cfMsg" role="status"></span>
         <div class="form-foot"><span></span><button type="button" class="btn ghost" id="cf-cancel">やめる</button></div>`;
@@ -902,10 +955,12 @@ td.partner { min-width: 7em; }
     const months = [...new Set(ok.map(r => r.date.slice(0, 7)))].sort();
     const opt = k => `<select id="csv-map-${k}" data-map="${k}"><option value="-1">（使わない）</option>${c.head.map((h, i) => `<option value="${i}"${c.map[k] === i ? ' selected' : ''}>${esc(h || `${i + 1}列目`)}${c.body[0]?.[i] ? `（例：${esc(String(c.body[0][i]).trim().slice(0, 14))}）` : ''}</option>`).join('')}</select>`;
     f.innerHTML = `<p style="margin:0;font-size:13px"><b>${esc(c.name)}</b>：${c.body.length}行。列の割り当てが違っていたら直してください。</p>
-      <div class="fields">${CSV_FIELDS.map(([k, l]) => `<label class="f" for="csv-map-${k}">${l}${opt(k)}</label>`).join('')}</div>
-      <div class="table-box" style="max-height:420px;overflow:auto"><table class="lines" style="min-width:720px"><thead><tr><th><input type="checkbox" id="csv-all" aria-label="すべて選ぶ"${ok.length === rows.filter(r => r.st === 'ok').length ? ' checked' : ''}></th><th>日付</th><th>摘要</th><th class="num">入金</th><th class="num">出金</th><th class="num">残高</th><th></th></tr></thead><tbody>
+      <div class="fields">${csvFields(BK()).map(([k, l]) => `<label class="f" for="csv-map-${k}">${l}${opt(k)}</label>`).join('')}</div>
+      ${isBank(BK()) ? '' : '<p style="margin:0;font-size:12px;color:var(--ink-soft)">日付が空の行は上の行と同じ日付に、「〃」は上の行と同じ内容にします。科目は名前が科目一覧と合うものだけ入れ、合わないものはメモに残します。</p>'}
+      <div class="table-box" style="max-height:420px;overflow:auto"><table class="lines" style="min-width:720px"><thead><tr><th><input type="checkbox" id="csv-all" aria-label="すべて選ぶ"${ok.length === rows.filter(r => r.st === 'ok').length ? ' checked' : ''}></th><th>日付</th>${isBank(BK()) ? '' : '<th>相手先</th>'}<th>摘要</th>${isBank(BK()) ? '' : '<th>科目・税率</th>'}<th class="num">入金</th><th class="num">出金</th><th class="num">残高</th><th></th></tr></thead><tbody>
         ${rows.map(r => `<tr${r.st !== 'ok' ? ' style="color:var(--ink-soft)"' : ''}><td><input type="checkbox" data-pick="${r.i}"${r.st === 'ok' && pick.has(r.i) ? ' checked' : ''}${r.st !== 'ok' ? ' disabled' : ''} aria-label="${r.i + 1}行目を取り込む"></td>
-          <td class="date">${r.date ? r.date.replace(/-/g, '/') : ''}</td><td>${esc(r.desc)}</td><td class="num in">${r.kind === 'in' ? yen(r.amt) : ''}</td><td class="num out">${r.kind === 'out' ? yen(r.amt) : ''}</td>
+          <td class="date">${r.date ? r.date.replace(/-/g, '/') : ''}</td>${isBank(BK()) ? '' : `<td>${esc(r.partner || '')}${r.dept ? `<small style="display:block;color:var(--ink-soft)">${esc(r.dept)}</small>` : ''}</td>`}<td>${esc(r.desc)}${r.memo ? `<small style="display:block;color:var(--ink-soft)">${esc(r.memo)}</small>` : ''}</td>
+          ${isBank(BK()) ? '' : `<td style="font-size:12px">${r.acct ? esc(acctName(r.acct)) : ''}${r.kind === 'out' ? `<span class="tag">${RATE_SHORT[r.rate]}</span>${r.noinv ? '<span class="tag">インボイスなし</span>' : ''}` : ''}</td>`}<td class="num in">${r.kind === 'in' ? yen(r.amt) : ''}</td><td class="num out">${r.kind === 'out' ? yen(r.amt) : ''}</td>
           <td class="num">${r.bal !== null ? yen(r.bal) : ''}</td><td style="font-size:12px">${CSV_ST[r.st]}</td></tr>`).join('') || '<tr><td colspan="7" class="empty">読み込める行がありません。列の割り当てを確かめてください。</td></tr>'}
       </tbody></table></div>
       <div class="form-foot"><span class="msg" id="cfMsg" role="status"></span>
@@ -933,7 +988,10 @@ td.partner { min-width: 7em; }
     const b = BK(), list = state.rows[b.id] ||= [];
     const take = csvRows().filter(r => r.st === 'ok' && view.csvPick.has(r.i));
     for (const r of take) {
-      list.push(clean({ id: id(), kind: r.kind, date: r.date, desc: r.desc || '（摘要なし）', [r.kind]: r.amt, bal: r.bal ?? undefined, src: 'csv' }));
+      const rec = isBank(b) ? { kind: r.kind, date: r.date, desc: r.desc || '（摘要なし）', [r.kind]: r.amt, bal: r.bal ?? undefined }
+        : r.kind === 'out' ? { kind: 'out', date: r.date, partner: r.partner, desc: r.desc || r.partner || '（摘要なし）', dept: r.dept, acct: r.acct, rate: r.rate, noinv: r.noinv, invNo: r.invNo, out: r.amt, memo: r.memo }
+        : { kind: 'in', date: r.date, partner: r.partner, desc: r.desc || r.partner || '（摘要なし）', dept: r.dept, acct: r.acct, in: r.amt, memo: r.memo };
+      list.push(clean({ id: id(), ...rec, src: 'csv' }));
       if (reopened(r.date.slice(0, 7), b.id)) addLog(r.date.slice(0, 7), `追加（CSV）：${b.name} ${md(r.date)} ${r.desc} ${yen(r.amt)}円`);
     }
     const months = [...new Set(take.map(r => Number(r.date.slice(5, 7)) + '月'))];
