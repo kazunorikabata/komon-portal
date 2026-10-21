@@ -860,12 +860,14 @@ html, body { margin: 0; }
     const js = journals(which);
     const problems = [];
     if (js.some(j => j.need && !j[j.need])) problems.push('科目が未設定の行があります。');
+    if (js.some(j => j.amt <= 0 || (j.extra && (!j.dr || !j.cr)))) problems.push('金額が0の行か、借方・貸方の入っていない足した仕訳があります。');
     if (js.some(j => ['dr', 'cr'].some(s => j['askSub' + s] && !j[s + 'Sub']))) problems.push('補助科目が未設定の行があります。');
     if (S.format === 'mjs' && js.some(j => ['dr', 'cr'].some(s => j['askBank' + s] && !j[s + 'Bank']))) problems.push('銀行コードが未設定の行があります。');
     if (S.format === 'mjs') {
       const lines = ['"伝票日付","（借）科目ｺｰﾄﾞ","（借）科目名","（借）補助ｺｰﾄﾞ","（借）補助名","（借）銀行ｺｰﾄﾞ","（借）銀行名","（貸）科目ｺｰﾄﾞ","（貸）科目名","（貸）補助ｺｰﾄﾞ","（貸）補助名","（貸）銀行ｺｰﾄﾞ","（貸）銀行名","金額","消費税ｺｰﾄﾞ","消費税率","事業者取引区分","摘要","摘要コード1","摘要コード2","摘要コード3"'];
       for (const j of js) {
-        const side = (code, sub, bank) => [code, q(acct(code)?.name), sub?.code ?? '', q(sub?.name), q(bank?.code), q(bank?.name)];
+        // 補助コード・銀行コードは数字のまま（引用符で囲むと、MJSが文字として読んで「銀行が自動修正されました」のエラーになる）
+        const side = (code, sub, bank) => [code, q(acct(code)?.name), sub?.code ?? '', q(sub?.name), bank?.code ?? '', q(bank?.name)];
         lines.push([j.date.replace(/-/g, '/'), ...side(j.dr, j.drSub, j.drBank), ...side(j.cr, j.crSub, j.crBank), j.amt, ...mjsTax(j), q(j.tekiyo), 0, 0, 0].join(','));
       }
       return { text: lines.join('\r\n') + '\r\n', problems, count: js.length };
