@@ -294,6 +294,7 @@ html, body { margin: 0; }
     simple: ['シンプル（相手先・内容・金額）', { name: '現金出納帳', kinds: ['in', 'out'], cols: { partner: true }, inTypes: ['預金から引き出し', 'その他'], count: true, expPrint: false }],
     detail: ['詳しく（科目・部署・登録番号も入力）', { name: '小口現金出納帳', kinds: ['in', 'out'], cols: { partner: true, dept: true, acct: true, invNo: true }, inTypes: ['売上より', '預金から引き出し', 'その他'], count: true, expPrint: false }],
     exp: ['経費精算方式（立替をまとめて精算・精算書を印刷）', { name: '経費精算', kinds: ['in', 'exp'], cols: { partner: true }, inTypes: ['預金から引き出し', 'その他'], count: true, expPrint: true }],
+    bank: ['通帳（預金）（手入力・CSVの読み込み・月末に通帳の残高と照合）', { name: '普通預金', type: 'bank', acct: '130', kinds: ['in', 'out'], cols: {}, inTypes: [], count: false, expPrint: false }],
   };
   const KIND_NAMES = { in: '入金', out: '出金', exp: '経費精算' };
   const COL_NAMES = { partner: '相手先・支払先', dept: '部署', acct: '科目', invNo: '登録番号' };
@@ -521,6 +522,17 @@ html, body { margin: 0; }
     // 顧問先が選んだ科目がこの現金そのものなら、仕訳にならないので使わない
     const hintOf = l => l.acct && l.acct !== C ? l.acct : undefined;
     const info = l => join([l.dept && `部署 ${l.dept}`, l.acct && `顧問先の科目 ${l.acct}`, l.invNo, l.memo], '・');
+    // 通帳：入金は 預金／科目、出金は 科目／預金。税区分は覚えたもの（なければ対象外）。銀行コードは預金の側に付ける
+    if (b.type === 'bank') {
+      const CB = b.bankCode ? { code: String(b.bankCode), name: b.bankName || '' } : null;
+      const src = (r, k) => join([`通帳 ${k}`, r.src === 'csv' && 'CSV', r.acct && `顧問先の科目 ${r.acct}`, r.memo], '・');
+      for (const r of b.rows) {
+        const base = { key: r.id, date: r.date, hint: hintOf(r), tax: '0', learnTax: true, desc: join([r.partner, r.desc]), partner: r.partner, tekiyo: join([r.partner, r.desc]) };
+        if (r.kind === 'in') out.push({ ...base, dr: C, drSub: CS, drBank: CB, need: 'cr', amt: r.in, src: src(r, '入金') });
+        else if (r.kind === 'out') out.push({ ...base, need: 'dr', cr: C, crSub: CS, crBank: CB, amt: r.out, src: src(r, '出金') });
+      }
+      return;
+    }
     for (const r of b.rows) {
       if (r.kind === 'in') out.push({ key: r.id, date: r.date, dr: C, drSub: CS, need: 'cr', hint: hintOf(r), amt: r.in, tax: '0', desc: join([r.partner, r.desc || r.inType]), partner: r.partner,
         tekiyo: join([r.partner, r.desc || r.inType]), src: join(['入金', r.inType, info(r)], '・') });
@@ -667,7 +679,7 @@ html, body { margin: 0; }
         j[j.need] = o.acct || hint || ruled || j.def || '';
         j.auto = !o.acct && !!(hint || ruled || j.def) && (hint ? '顧問先が選んだ科目です' : '前回と同じ科目を自動で入れました');
         const tr = state.taxRules?.[normDesc(j.desc)];
-        if (j.bucket === 'ot' && tr) j.tax = tr;
+        if ((j.bucket === 'ot' || j.learnTax) && tr) j.tax = tr;
         if (!o.tax && j[j.need] && acct(j[j.need])?.noTax) j.tax = '0';
       }
       // 補助科目・銀行コードのある科目は、どちらも必ず入れる（ないと会計ソフトに取り込めない）。
@@ -703,7 +715,7 @@ html, body { margin: 0; }
     return `<select id="${kind}-${s}-${j.key}" data-attr="${j.key}" data-side="${s}" data-kind="${kind}" class="${sel ? '' : 'need'}" aria-label="${md(j.date)} ${esc(j.desc)}の${label}" style="margin-top:4px"><option value="">${label}を選ぶ</option>${list.map(x => `<option value="${esc(x.code)}"${x.code === sel ? ' selected' : ''}>${esc(x.code)} ${esc(x.name)}</option>`).join('')}</select>`;
   };
   const subSelect = (j, s) => attrSelect(j, s, 'Sub') + attrSelect(j, s, 'Bank');
-  const fixedCell = (code, sub) => `<span class="fixed"><code>${code}</code>${esc(acct(code)?.name || '？')}${sub ? `／${esc(sub.code)} ${esc(sub.name)}` : ''}</span>`;
+  const fixedCell = (code, sub, bank) => `<span class="fixed"><code>${code}</code>${esc(acct(code)?.name || '？')}${sub ? `／${esc(sub.code)} ${esc(sub.name)}` : ''}${bank && isMjs() ? `<small style="display:block;color:var(--ink-soft)">銀行 ${esc(bank.code)} ${esc(bank.name)}</small>` : ''}</span>`;
 
   // 提出は帳簿ごと。以前の「月まとめて」の提出（文字列）は3つとも提出済みとみなす
   const subMap = v => typeof v === 'string' ? { cash: v, sr: v, pl: v } : (v && typeof v === 'object' ? v : {});
@@ -741,7 +753,7 @@ html, body { margin: 0; }
       const missing = rowProblem(j);
       const side = s => j.need === s
         ? `<select id="acct-${j.key}" data-acct="${j.key}" class="${j.need && !j[j.need] ? 'need' : ''}" aria-label="${md(j.date)} ${esc(j.desc)}の科目">${acctOptions(j[s])}</select>${subSelect(j, s)}${j.auto ? `<div class="auto">${j.auto}</div>` : ''}`
-        : fixedCell(j[s], j['askSub' + s] ? null : j[s + 'Sub']) + subSelect(j, s);
+        : fixedCell(j[s], j['askSub' + s] ? null : j[s + 'Sub'], j['askBank' + s] ? null : j[s + 'Bank']) + subSelect(j, s);
       h += `<tr class="${missing ? 'need' : ''}"><td class="date">${md(j.date)}</td><td>${side('dr')}</td><td>${side('cr')}</td><td class="num">${yen(j.amt)}</td>
         <td><select id="tax-${j.key}" data-tax="${j.key}" aria-label="税区分">${Object.entries(TAXES).map(([k, t]) => `<option value="${k}"${k === j.tax ? ' selected' : ''}>${t.label}</option>`).join('')}</select></td>
         <td><input type="text" id="tek-${j.key}" data-tek="${j.key}" value="${esc(j.tekiyo)}" aria-label="摘要"></td>
@@ -912,6 +924,8 @@ html, body { margin: 0; }
       const bump = (o, k, at) => { const v = o[k] || [0, 0]; o[k] = [v[0] + 1, Math.max(v[1], at)]; };
       const all = parseCsv(text);
       const mjs = (all[0] || []).some(c => c.includes('伝票日付'));
+      // MJSで銀行コードの付いている科目（普通預金など）も、通帳の取引として覚える（あとで通帳を足しても使えるように）
+      if (mjs) for (const r of all) for (const [code, bc] of [[r[1], r[5]], [r[7], r[11]]]) if (/^\d+$/.test(code || '') && /^\d+$/.test(bc || '') && !cashCodes.includes(code)) cashCodes.push(code);
       // MJSの消費税コード・税率・事業者取引区分 → 税区分（sales は現金が借方＝入金）
       const fromMjs = (code, rate, kb, sales) => code === '10' ? (sales ? (rate === '5' ? 's8' : 's10') : rate === '5' ? (kb === '1' ? 'p8n' : 'p8') : (kb === '1' ? 'p10n' : 'p10'))
         : code === '30' ? (sales ? null : 'n34') : code === '40' || code === '0' ? '0' : null;
@@ -1073,23 +1087,26 @@ html, body { margin: 0; }
     const chk = (i, f, on, label) => `<label class="check" for="cf-${i}-${f}"><input type="checkbox" id="cf-${i}-${f}" data-b="${i}" data-f="${f}"${on ? ' checked' : ''}>${label}</label>`;
     $('cfgEdit').innerHTML = `
       <p class="hint">顧問先のページに出す出納帳と、それぞれの入力のしかたを決めます。出納帳ごとに別々に提出します。変えたら「設定を保存する」を押してください。</p>
-      ${C.cashbooks.map((b, i) => `<fieldset class="cfg-book"><legend>出納帳 ${i + 1}</legend>
+      ${C.cashbooks.map((b, i) => { const bank = b.type === 'bank'; return `<fieldset class="cfg-book"><legend>${bank ? '通帳' : '出納帳'} ${i + 1}</legend>
         <div class="fields">
           <label class="f" for="cf-${i}-name">名前<input type="text" id="cf-${i}-name" data-b="${i}" data-f="name" value="${esc(b.name)}"></label>
-          <label class="f" for="cf-${i}-acct">会計ソフトの科目（この現金）<select id="cf-${i}-acct" data-b="${i}" data-f="acct">${acctOptions(b.acct || CASH)}</select></label>
+          <label class="f" for="cf-${i}-acct">会計ソフトの科目（この${bank ? '預金' : '現金'}）<select id="cf-${i}-acct" data-b="${i}" data-f="acct">${acctOptions(b.acct || CASH)}</select></label>
+          ${bank ? `<label class="f" for="cf-${i}-bankCode">銀行コード（MJS・任意）<input type="text" id="cf-${i}-bankCode" data-b="${i}" data-f="bankCode" inputmode="numeric" value="${esc(b.bankCode || '')}" placeholder="例：1"></label>
+          <label class="f" for="cf-${i}-bankName">銀行の名前（MJS・任意）<input type="text" id="cf-${i}-bankName" data-b="${i}" data-f="bankName" value="${esc(b.bankName || '')}" placeholder="例：東日本銀行/深川0056853"></label>` : ''}
           <label class="f" for="cf-${i}-sub">補助コード（任意）<input type="text" id="cf-${i}-sub" data-b="${i}" data-f="sub" inputmode="numeric" value="${esc(b.sub || '')}" placeholder="例：2"></label>
           <label class="f" for="cf-${i}-subName">補助の名前（任意）<input type="text" id="cf-${i}-subName" data-b="${i}" data-f="subName" value="${esc(b.subName || '')}" placeholder="例：コース"></label>
           <label class="f" for="cf-${i}-opening">使い始める前の残高（円）<input type="number" id="cf-${i}-opening" data-b="${i}" data-f="opening" value="${Number(b.opening) || 0}"></label>
         </div>
+        ${bank ? `<div class="checks"><span>入力する項目</span>${chk(i, 'col:partner', b.cols?.partner, '相手先')}${chk(i, 'col:acct', b.cols?.acct, '科目')}<span style="min-width:0">（日付・摘要・入金・出金・メモは必ず。CSVの読み込みと、月末の通帳の残高との照合が付きます）</span></div>` : `
         <div class="checks"><span>記入の種類</span>${Object.entries(KIND_NAMES).map(([k, l]) => chk(i, 'kind:' + k, b.kinds.includes(k), l)).join('')}</div>
         <div class="checks"><span>入力する項目</span>${Object.entries(COL_NAMES).map(([k, l]) => chk(i, 'col:' + k, b.cols?.[k], l)).join('')}<span style="min-width:0">（日付・内容・金額・税率・インボイスなしは必ず入力）</span></div>
         <div class="fields">
           <label class="f" for="cf-${i}-inTypes">入金の種類（カンマ区切り）<input type="text" id="cf-${i}-inTypes" data-b="${i}" data-f="inTypes" value="${esc((b.inTypes || []).join('、'))}" placeholder="例：売上より、預金から引き出し、その他"></label>
           <label class="f" for="cf-${i}-depts">部署の候補（カンマ区切り）<input type="text" id="cf-${i}-depts" data-b="${i}" data-f="depts" value="${esc((b.depts || []).join('、'))}" placeholder="例：事務所、フロント、コース管理"></label>
         </div>
-        <div class="checks">${chk(i, 'count', b.count !== false, '提出の前に現金残高確認票を記入する')}${chk(i, 'expPrint', b.expPrint !== false, '経費精算書を印刷できるようにする')}</div>
-        <div class="foot"><span class="hint">ID：${esc(b.id)}</span>${C.cashbooks.length > 1 ? `<button type="button" class="link-btn danger" data-rmbook="${i}">この出納帳を外す</button>` : ''}</div>
-      </fieldset>`).join('')}
+        <div class="checks">${chk(i, 'count', b.count !== false, '提出の前に現金残高確認票を記入する')}${chk(i, 'expPrint', b.expPrint !== false, '経費精算書を印刷できるようにする')}</div>`}
+        <div class="foot"><span class="hint">ID：${esc(b.id)}</span>${C.cashbooks.length > 1 ? `<button type="button" class="link-btn danger" data-rmbook="${i}">この${bank ? '通帳' : '出納帳'}を外す</button>` : ''}</div>
+      </fieldset>`; }).join('')}
       ${payCfgHtml(C)}
       <fieldset class="cfg-book"><legend>メールアドレスごとに使える出納帳</legend>
         <p class="hint">チェックを外した出納帳は、その人の画面に出ず、入力もできません。全部にチェックがある人は、あとで足した出納帳も使えます。事務所のスタッフは、すべての出納帳を使えます。</p>
@@ -1216,7 +1233,7 @@ html, body { margin: 0; }
       const [, p] = PRESETS[$('cf-preset').value];
       let n = cfgDraft.cashbooks.length + 1, bid;
       do bid = 'b' + n++; while (cfgDraft.cashbooks.some(b => b.id === bid));
-      cfgDraft.cashbooks.push({ ...JSON.parse(JSON.stringify(p)), id: bid, acct: CASH, opening: 0, depts: [] });
+      cfgDraft.cashbooks.push({ ...JSON.parse(JSON.stringify(p)), id: bid, acct: p.acct || CASH, opening: 0, depts: [] });
       cfgDirty = true; renderCfg(); return;
     }
     if (t.dataset.rmbook !== undefined) {
