@@ -1252,7 +1252,8 @@ html, body { margin: 0; }
     const host = location.hostname.split('.').slice(1).join('.');
     $('clientTable').innerHTML = `<thead><tr><th>顧問先</th><th>使う画面</th><th>ページのアドレス</th><th>ログインできるメールアドレス</th></tr></thead><tbody>${clients.map(c => `<tr>
       <td>${esc(c.name)}</td><td>${esc(templates[c.template] || c.template)}</td><td><a href="https://${esc(c.subdomain)}.${esc(host)}/" target="_blank" rel="noopener"><code>https://${esc(c.subdomain)}.${esc(host)}</code></a></td>
-      <td>${c.emails.map(e => `<div>${esc(e)} <button type="button" class="link-btn danger" data-rmmail="${esc(e)}" data-client="${c.id}">外す</button></div>`).join('') || '<span class="hint">まだありません</span>'}</td></tr>`).join('') || '<tr><td colspan="4" class="hint">まだ顧問先がありません</td></tr>'}</tbody>`;
+      <td>${c.emails.map(e => `<div>${esc(e)} <button type="button" class="link-btn danger" data-rmmail="${esc(e)}" data-client="${c.id}">外す</button>${mailAccess(c, e)}</div>`).join('') || '<span class="hint">まだありません</span>'}</td></tr>`).join('') || '<tr><td colspan="4" class="hint">まだ顧問先がありません</td></tr>'}</tbody>
+      ${current ? '' : '<caption class="hint" style="caption-side:bottom;text-align:left;padding-top:6px">顧問先を選ぶと、メールアドレスごとに使える出納帳を選べます（標準の画面の顧問先）。</caption>'}`;
     // 修正依頼（選んでいる顧問先の、承認待ちの依頼）
     const pend = [];
     for (const [k, d] of Object.entries(docs)) if (k.startsWith('m:')) (d.data.requests || []).forEach((r, i) => { if (r.status === 'pending') pend.push({ m: k.slice(2), i, r }); });
@@ -1261,6 +1262,33 @@ html, body { margin: 0; }
       `<tr><td>${Number(p.m.slice(5))}月分</td><td>${p.r.book ? BOOKS[p.r.book] : 'すべて'}</td><td>${esc(p.r.reason)}</td><td>${esc(p.r.at)}</td><td><button type="button" class="btn" data-approve="${p.m}" data-idx="${p.i}">承認してロックを外す</button></td></tr>`).join('')}</tbody></table></div>` : '<p class="hint">承認待ちの依頼はありません。</p>';
     if (pend.length) $('reqBox').open = true;
   }
+
+  // メールアドレスごとに使える出納帳（標準の画面で、選んでいる顧問先のとき）。押したらすぐ保存する
+  function mailAccess(c, em) {
+    if (c.id !== current?.id || !isStd()) return '';
+    const cfg = docs.config?.data || {};
+    const books = accessBooks({ ...cfg, cashbooks: cfg.cashbooks?.length ? cfg.cashbooks : [DEFAULT_BOOK] });
+    const acc = cfg.access?.[em];
+    return `<div class="checks" style="margin:2px 0 8px 1em">${books.map(b => `<label class="check"><input type="checkbox" data-macc="${esc(em)}" data-book="${esc(b.id)}"${!acc || acc.includes(b.id) ? ' checked' : ''}>${esc(b.name)}</label>`).join('')}<span class="hint" style="min-width:0">${acc ? '（チェックしたものだけ使える）' : '（すべて使える）'}</span></div>`;
+  }
+  $('clientTable').addEventListener('change', async e => {
+    const t = e.target; if (!t.dataset.macc || !current) return;
+    const em = t.dataset.macc, data = JSON.parse(JSON.stringify(docs.config?.data || { cashbooks: [DEFAULT_BOOK] }));
+    const ids = accessBooks({ ...data, cashbooks: data.cashbooks?.length ? data.cashbooks : [DEFAULT_BOOK] }).map(b => b.id);
+    const cur = data.access?.[em] || ids;
+    const next = ids.filter(id => id === t.dataset.book ? t.checked : cur.includes(id));
+    const m = $('nmMsg');
+    if (!next.length) { t.checked = true; m.className = 'msg'; m.textContent = '1つ以上は使えるようにしてください。使わせたくないときは、メールアドレスを外してください。'; return; }
+    data.access ||= {};
+    if (next.length === ids.length) delete data.access[em]; else data.access[em] = next;
+    try {
+      const r = await api(`/api/office/clients/${current.id}/doc/config`, { method: 'PUT', body: JSON.stringify({ data, version: docs.config?.version || 0 }) });
+      docs.config = { data, version: r.version };
+      if (cfgDraft) cfgDraft.access = JSON.parse(JSON.stringify(data.access));
+      render(); renderCfg();
+      m.className = 'msg ok'; m.textContent = `${em} の使える出納帳を保存しました。`;
+    } catch (err) { m.className = 'msg'; m.textContent = err.message; if (err.status === 409) showReload(err.message); }
+  });
 
   const stamp = () => { const t = new Date(); return `${t.getMonth() + 1}月${t.getDate()}日 ${String(t.getHours()).padStart(2, '0')}:${String(t.getMinutes()).padStart(2, '0')}`; };
 
