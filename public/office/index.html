@@ -241,6 +241,15 @@ html, body { margin: 0; }
       </div>
       <pre class="preview" id="preview" aria-label="CSVの中身（先頭）"></pre>
       <p class="hint" id="fmtHint"></p>
+      <details id="tekBox"><summary class="hint">摘要の自動修正</summary>
+        <div style="display:grid;gap:8px;margin-top:8px">
+          <label class="check" for="s-kanaFull"><input type="checkbox" id="s-kanaFull">半角カナを全角にする（例：ﾌﾘｺﾐ → フリコミ）</label>
+          <p class="hint">置き換え：左の文字を右の文字に置き換えます（例：フリコミ → 振込、カ) → （株））。右を空にすると消します。上から順に置き換えます。</p>
+          <div id="tekRepl" style="display:grid;gap:6px"></div>
+          <div><button type="button" class="btn ghost" id="tekAdd">置き換えを追加</button></div>
+          <p class="hint">仕訳の表で摘要を直すと、同じ取引には次から直した摘要が入ります（置き換えより優先）。<span id="tekLearned"></span></p>
+        </div>
+      </details>
     </section>
 
     <section class="panel">
@@ -397,6 +406,9 @@ html, body { margin: 0; }
     st.subs ||= {};       // 科目ごとの補助科目 { 科目コード: [{ code, name }] }
     st.subRules ||= {};   // 摘要・相手先ごとに覚えた補助 { キー: { acct, sub } }
     st.banks ||= {};      // 科目ごとの銀行コード（MJS）{ 科目コード: [{ code, name }] }
+    st.tekRules ||= {};   // 手で直した摘要 { 正規化した顧問先の摘要: 直した摘要 }
+    st.tekReplace ||= []; // 摘要の置き換え [{ from, to }]
+    st.extra ||= {};      // 事務所が足した仕訳 { '月|帳簿': [{ id, date, dr, cr, amt, tax, tekiyo }] }
     st.bankRules ||= {};  // 摘要・相手先ごとに覚えた銀行 { キー: { acct, bank } }
     st.settings = { ...defaultOffice('').settings, ...st.settings, skc: st.settings?.skc || '11', skn: st.settings?.skn || '課税売上' };
     return st;
@@ -669,12 +681,26 @@ html, body { margin: 0; }
         if (p.fee) out.push({ key: `plfee:${m}:${sid}:${p.id}`, date: p.date, dr: KAIKAKE, cr: BANK, amt: p.fee, tax: '0', desc: '仕入:振込手数料', tekiyo: `${sp.name} 振込手数料（先方負担）`, src: '仕入一覧の振込' });
       }
     }
+    // 事務所が分けた行：元の行から金額を引き、同じ日付・同じ相手の行を足す
+    const pre = k => `${THIS}|${which.startsWith('cb:') ? which + '|' : ''}${k}`;
+    for (const j of [...out]) {
+      const sp = state.over[pre(j.key)]?.splits || [];
+      if (!sp.length || !j.need) continue;
+      j.splitBase = true;
+      for (const x of sp) {
+        j.amt -= Number(x.amt) || 0;
+        out.push({ ...j, key: `${j.key}:s:${x.id}`, amt: Number(x.amt) || 0, splitOf: pre(j.key), splitId: x.id, hint: undefined, def: undefined, noRule: true, splitBase: false, src: '上の行を分けた行' });
+      }
+    }
+    // 事務所が足した仕訳
+    for (const x of state.extra?.[`${THIS}|${which}`] || []) out.push({ key: `x:${x.id}`, extra: x.id, date: x.date || END, dr: x.dr || '', cr: x.cr || '', amt: Number(x.amt) || 0, tax: x.tax || '0', desc: '', tekiyo: x.tekiyo || '', src: '事務所が足した仕訳' });
+
     // 事務所の設定（上書き・覚えた科目）を重ねる
     for (const j of out) {
       j.key = `${THIS}|${which.startsWith('cb:') ? which + '|' : ''}${j.key}`;
       const o = state.over[j.key] || {};
       if (j.need) {
-        const ruled = state.rules[j.desc] || learned(state.rules, j.desc) || (j.partner && state.rules['p:' + normDesc(j.partner)]) || '';
+        const ruled = j.noRule ? '' : state.rules[j.desc] || learned(state.rules, j.desc) || (j.partner && state.rules['p:' + normDesc(j.partner)]) || '';
         const hint = j.hint && acct(j.hint) ? j.hint : '';
         j[j.need] = o.acct || hint || ruled || j.def || '';
         j.auto = !o.acct && !!(hint || ruled || j.def) && (hint ? '顧問先が選んだ科目です' : '前回と同じ科目を自動で入れました');
@@ -699,16 +725,25 @@ html, body { margin: 0; }
         }
       }
       if (o.tax) j.tax = o.tax;
+      // 摘要：手で直したことのある取引はその摘要、なければ置き換え（半角カナ・置き換えの一覧）をしたもの
+      if (!j.extra) { const lt = j.splitOf ? undefined : state.tekRules?.[normDesc(j.desc)]; j.tekiyo = lt !== undefined ? lt : fixTek(j.tekiyo); }
       if (o.tekiyo !== undefined) j.tekiyo = o.tekiyo;
     }
     return out.sort((a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : 0);
   }
 
+  // 摘要の自動修正：半角カナを全角に、置き換えの一覧で置き換える
+  const halfKana = t => String(t || '').replace(/[\uFF61-\uFF9F]+/g, x => x.normalize('NFKC'));
+  function fixTek(t) {
+    let v = state.settings.kanaFull ? halfKana(t) : String(t || '');
+    for (const r of state.tekReplace || []) if (r.from) v = v.split(state.settings.kanaFull ? halfKana(r.from) : r.from).join(r.to || '');
+    return v.replace(/\s+/g, ' ').trim();
+  }
   const acctOptions = sel => `<option value="">科目を選ぶ</option>` + state.accts.map(a => `<option value="${a.code}"${a.code === sel ? ' selected' : ''}>${a.code} ${esc(a.name)}</option>`).join('');
   // 補助科目・銀行コードのある科目なら、選ぶ欄を出す（未設定は赤）
   const isMjs = () => state.settings.format === 'mjs';
   const missingAttr = (j, s) => (j['askSub' + s] && !j[s + 'Sub']) || (isMjs() && j['askBank' + s] && !j[s + 'Bank']);
-  const rowProblem = j => (j.need && !j[j.need]) || ['dr', 'cr'].some(s => j[s] && missingAttr(j, s));
+  const rowProblem = j => (j.need && !j[j.need]) || ['dr', 'cr'].some(s => j[s] && missingAttr(j, s)) || (j.extra && (!j.dr || !j.cr || !j.amt)) || j.amt <= 0;
   const attrSelect = (j, s, kind) => {
     if (!j['ask' + kind + s] || (kind === 'Bank' && !isMjs())) return '';
     const list = (kind === 'Sub' ? state.subs : state.banks)[j[s]], sel = j[s + kind]?.code ?? '', label = kind === 'Sub' ? '補助' : '銀行';
@@ -749,17 +784,31 @@ html, body { margin: 0; }
       `<span class="chip">自動で入った科目 <b>${all.filter(j => j.auto).length}</b> 行</span>` +
       `<span class="chip">インボイスなし <b>${all.filter(j => j.noInv && j.tax !== '0').length}</b> 行</span>`;
     let h = `<thead><tr><th>日付</th><th>借方</th><th>貸方</th><th class="num">金額</th><th>税区分</th><th>摘要（会計ソフトに出る文字）</th><th>顧問先の入力</th></tr></thead><tbody>`;
+    const taxSel = j => `<select id="tax-${j.key}" data-tax="${j.key}" aria-label="税区分">${Object.entries(TAXES).map(([k, t]) => `<option value="${k}"${k === j.tax ? ' selected' : ''}>${t.label}</option>`).join('')}</select>`;
     for (const j of js) {
       const missing = rowProblem(j);
+      // 事務所が足した仕訳：日付・借方・貸方・金額を自由に入れる
+      if (j.extra) {
+        const xs = f => `<select id="x-${f}-${j.extra}" data-x="${j.extra}" data-xf="${f}" class="${j[f] ? '' : 'need'}" aria-label="足した仕訳の${f === 'dr' ? '借方' : '貸方'}">${acctOptions(j[f])}</select>${subSelect(j, f)}`;
+        h += `<tr class="${missing ? 'need' : ''}"><td><input type="date" id="x-date-${j.extra}" data-x="${j.extra}" data-xf="date" value="${j.date}" style="width:9.5em" aria-label="足した仕訳の日付"></td><td>${xs('dr')}</td><td>${xs('cr')}</td>
+          <td class="num"><input type="number" id="x-amt-${j.extra}" data-x="${j.extra}" data-xf="amt" value="${j.amt || ''}" style="width:7em" aria-label="足した仕訳の金額"></td><td>${taxSel(j)}</td>
+          <td><input type="text" id="x-tek-${j.extra}" data-x="${j.extra}" data-xf="tekiyo" value="${esc(j.tekiyo)}" aria-label="足した仕訳の摘要"></td>
+          <td class="src">${esc(j.src)}<div><button type="button" class="link-btn danger" data-xdel="${j.extra}">この仕訳を消す</button></div></td></tr>`;
+        continue;
+      }
       const side = s => j.need === s
         ? `<select id="acct-${j.key}" data-acct="${j.key}" class="${j.need && !j[j.need] ? 'need' : ''}" aria-label="${md(j.date)} ${esc(j.desc)}の科目">${acctOptions(j[s])}</select>${subSelect(j, s)}${j.auto ? `<div class="auto">${j.auto}</div>` : ''}`
         : fixedCell(j[s], j['askSub' + s] ? null : j[s + 'Sub'], j['askBank' + s] ? null : j[s + 'Bank']) + subSelect(j, s);
-      h += `<tr class="${missing ? 'need' : ''}"><td class="date">${md(j.date)}</td><td>${side('dr')}</td><td>${side('cr')}</td><td class="num">${yen(j.amt)}</td>
-        <td><select id="tax-${j.key}" data-tax="${j.key}" aria-label="税区分">${Object.entries(TAXES).map(([k, t]) => `<option value="${k}"${k === j.tax ? ' selected' : ''}>${t.label}</option>`).join('')}</select></td>
+      // 分けた行は金額を入れる。元の行には「分ける」を出す
+      const amtCell = j.splitOf
+        ? `<input type="number" id="sp-${j.key}" data-spamt="${j.splitOf}" data-spid="${j.splitId}" value="${j.amt || ''}" style="width:7em" aria-label="分けた金額"><div><button type="button" class="link-btn danger" data-spdel="${j.splitOf}" data-spid="${j.splitId}">分けるのをやめる</button></div>`
+        : `${yen(j.amt)}${j.amt <= 0 ? '<div class="noinv">分けた金額が多すぎます</div>' : ''}${j.need ? `<div><button type="button" class="link-btn" data-split="${j.key}">この行を分ける</button></div>` : ''}`;
+      h += `<tr class="${missing ? 'need' : ''}"${j.splitOf ? ' style="background:color-mix(in srgb, var(--accent-soft) 40%, transparent)"' : ''}><td class="date">${md(j.date)}</td><td>${side('dr')}</td><td>${side('cr')}</td><td class="num">${amtCell}</td>
+        <td>${taxSel(j)}</td>
         <td><input type="text" id="tek-${j.key}" data-tek="${j.key}" value="${esc(j.tekiyo)}" aria-label="摘要"></td>
         <td class="src">${esc(j.src)}${j.noInv && j.tax !== '0' ? '<div class="noinv">インボイスなし</div>' : ''}</td></tr>`;
     }
-    $('journal').innerHTML = h + '</tbody>';
+    $('journal').innerHTML = h + `<tbody><tr><td colspan="7"><button type="button" class="btn ghost" id="addExtra">＋ 仕訳を追加</button> <span class="hint">この帳簿・この月に、顧問先の入力にない仕訳を足します（決算の修正など）。</span></td></tr></tbody>`;
     markSeen();
     // 給与のお知らせ（顧問先のページと同じもの）
     const al = book === 'pay' ? Payroll.alerts({ month: THIS, employees: CLIENT.employees, rowOf: (mm, id) => docs['m:' + mm]?.data?.pay?.rows?.[id], cfg: Payroll.settings(CFG.payroll, docs.master?.data?.paySettings) }) : [];
@@ -835,7 +884,21 @@ html, body { margin: 0; }
     return { text: lines.join('\r\n') + '\r\n', problems, count: js.length };
   }
 
+  function renderTekBox() {
+    $('s-kanaFull').checked = !!state.settings.kanaFull;
+    // 入力中の欄を消さないよう、行が増えた・減ったときだけ描き直す
+    const box = $('tekRepl'), list = state.tekReplace || [];
+    if (box.children.length !== list.length || box.dataset.client !== (current?.id || '')) {
+      box.dataset.client = current?.id || '';
+      box.innerHTML = list.map((r, i) => `<div style="display:grid;grid-template-columns:1fr auto 1fr auto;gap:6px;align-items:center">
+      <input type="text" id="tr-${i}-from" data-tr="${i}" data-trf="from" value="${esc(r.from)}" aria-label="置き換える文字"><span>→</span>
+      <input type="text" id="tr-${i}-to" data-tr="${i}" data-trf="to" value="${esc(r.to)}" aria-label="置き換えたあとの文字"><button type="button" class="link-btn danger" data-trdel="${i}">消す</button></div>`).join('');
+    }
+    const n = Object.keys(state.tekRules || {}).length;
+    $('tekLearned').textContent = n ? `今、${n}件の摘要を覚えています。` : '';
+  }
   function renderExport() {
+    renderTekBox();
     const S = state.settings;
     for (const k of ['code', 'name', 'fy', 'skc', 'skn']) if (document.activeElement !== $('s-' + k)) $('s-' + k).value = S[k] || '';
     const { text, problems } = buildCsv(book);
@@ -858,11 +921,19 @@ html, body { margin: 0; }
 
   $('journal').addEventListener('change', e => {
     const t = e.target;
+    if (t.dataset.x) {
+      const list = state.extra[`${THIS}|${book}`] || [], x = list.find(v => v.id === t.dataset.x);
+      if (x) x[t.dataset.xf] = t.dataset.xf === 'amt' ? Math.round(Number(t.value)) || 0 : t.value.trim();
+    }
+    if (t.dataset.spamt) {
+      const sp = (state.over[t.dataset.spamt]?.splits || []).find(v => v.id === t.dataset.spid);
+      if (sp) sp.amt = Math.round(Number(t.value)) || 0;
+    }
     if (t.dataset.acct) {
       const j = journals(book).find(x => x.key === t.dataset.acct);
       state.over[j.key] = { ...(state.over[j.key] || {}), acct: t.value || undefined };
-      if (t.value) state.rules[normDesc(j.desc)] = t.value;   // 同じ内容の取引に次回から自動で入れる
-      if (t.value && j.partner) state.rules['p:' + normDesc(j.partner)] = t.value;   // 同じ相手先にも
+      if (t.value && !j.noRule) state.rules[normDesc(j.desc)] = t.value;   // 同じ内容の取引に次回から自動で入れる
+      if (t.value && j.partner && !j.noRule) state.rules['p:' + normDesc(j.partner)] = t.value;   // 同じ相手先にも
       if (t.value && acct(t.value)?.noTax) state.over[j.key].tax = '0';
     }
     if (t.dataset.attr) {
@@ -876,20 +947,44 @@ html, body { margin: 0; }
       }
     }
     if (t.dataset.tax) state.over[t.dataset.tax] = { ...(state.over[t.dataset.tax] || {}), tax: t.value };
-    if (t.dataset.tek) state.over[t.dataset.tek] = { ...(state.over[t.dataset.tek] || {}), tekiyo: t.value.trim() };
+    if (t.dataset.tek) {
+      state.over[t.dataset.tek] = { ...(state.over[t.dataset.tek] || {}), tekiyo: t.value.trim() };
+      // 直した摘要は覚えて、同じ取引には次から同じ摘要を入れる
+      const j = journals(book).find(x => x.key === t.dataset.tek);
+      if (j && !j.splitOf && j.desc) state.tekRules[normDesc(j.desc)] = t.value.trim();
+    }
     save(); render();
     const again = $(t.id); if (again) again.focus();
+  });
+
+  // 行を分ける・仕訳を足す・消す
+  $('journal').addEventListener('click', e => {
+    const t = e.target, id = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
+    if (t.dataset.split) { const o = state.over[t.dataset.split] ||= {}; (o.splits ||= []).push({ id: id(), amt: 0 }); }
+    else if (t.dataset.spdel) { const o = state.over[t.dataset.spdel]; if (o?.splits) o.splits = o.splits.filter(v => v.id !== t.dataset.spid); }
+    else if (t.id === 'addExtra') (state.extra[`${THIS}|${book}`] ||= []).push({ id: id(), date: END, dr: '', cr: '', amt: 0, tax: '0', tekiyo: '' });
+    else if (t.dataset.xdel) { const k = `${THIS}|${book}`; state.extra[k] = (state.extra[k] || []).filter(v => v.id !== t.dataset.xdel); }
+    else return;
+    save(); render();
   });
 
   $('fillNext').addEventListener('click', () => {
     for (const b of [book, ...Object.keys(BOOKS).filter(x => x !== book)]) {
       const j = journals(b).find(rowProblem);
-      if (j) { book = b; render(); const el = document.querySelector(`[id="acct-${j.key}"].need, [data-attr="${j.key}"].need`) || $('acct-' + j.key); el.scrollIntoView({ block: 'center' }); el.focus(); return; }
+      if (j) {
+        book = b; render();
+        const el = document.querySelector(`[id="acct-${j.key}"].need, [data-attr="${j.key}"].need`) || (j.extra && document.querySelector(`[data-x="${j.extra}"].need, [id="x-amt-${j.extra}"]`)) || $('acct-' + j.key) || $('sp-' + j.key) || $('tek-' + j.key);
+        el.scrollIntoView({ block: 'center' }); el.focus(); return;
+      }
     }
   });
 
   $('s-withPay').addEventListener('change', e => { state.settings.withPay = e.target.checked; save(); render(); });
   for (const f of ['jdl', 'mjs']) $('s-fmt-' + f).addEventListener('change', () => { state.settings.format = f; save(); render(); });
+  $('s-kanaFull').addEventListener('change', e => { state.settings.kanaFull = e.target.checked; save(); render(); });
+  $('tekAdd').addEventListener('click', () => { (state.tekReplace ||= []).push({ from: '', to: '' }); save(); renderTekBox(); $(`tr-${state.tekReplace.length - 1}-from`).focus(); });
+  $('tekRepl').addEventListener('change', e => { const t = e.target; if (t.dataset.tr === undefined) return; state.tekReplace[Number(t.dataset.tr)][t.dataset.trf] = t.value; save(); render(); });
+  $('tekRepl').addEventListener('click', e => { const t = e.target; if (t.dataset.trdel === undefined) return; state.tekReplace.splice(Number(t.dataset.trdel), 1); $('tekRepl').innerHTML = ''; save(); render(); });
   $('s-withHeader').addEventListener('change', e => { state.settings.withHeader = e.target.checked; save(); render(); });
   for (const k of ['code', 'name', 'fy', 'skc', 'skn']) $('s-' + k).addEventListener('input', e => { state.settings[k] = e.target.value.trim(); save(); renderExport(); });
 
