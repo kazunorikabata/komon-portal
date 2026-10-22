@@ -91,6 +91,7 @@ input:focus-visible, select:focus-visible, button:focus-visible { outline: 2px s
 .auto { font-size: 11px; color: var(--ok); white-space: nowrap; }
 .btn { font: inherit; font-weight: 500; cursor: pointer; border-radius: 4px; padding: 9px 18px; border: 1px solid var(--accent); background: var(--accent); color: var(--sheet); }
 .btn.ghost { background: transparent; color: var(--accent); }
+a.btn { display: inline-block; text-decoration: none; }
 .btn:disabled { opacity: .45; cursor: not-allowed; }
 .panel { background: var(--sheet); border: 1px solid var(--rule); border-radius: 4px; padding: 16px; display: grid; gap: 14px; min-width: 0; }
 .panel h3 { margin: 0; font-size: 15px; }
@@ -149,14 +150,62 @@ html, body { margin: 0; }
 .cfg-book legend { font-weight: 500; padding: 0 6px; }
 .checks { display: flex; flex-wrap: wrap; gap: 6px 16px; align-items: center; font-size: 13px; }
 .checks > span { color: var(--ink-soft); font-size: 12px; min-width: 7em; }
+/* サイドバーで画面を切り替える */
+.app { display: grid; grid-template-columns: 228px minmax(0, 1fr); min-height: 100vh; }
+.side { position: sticky; top: 0; align-self: start; height: 100vh; overflow-y: auto; background: var(--sheet); border-right: 1px solid var(--rule); padding: 22px 12px; display: grid; align-content: start; gap: 2px; }
+.side .brand { font-family: var(--font-display); font-weight: 700; font-size: 17px; padding: 0 10px 14px; line-height: 1.35; }
+.side .group { font-size: 11px; letter-spacing: .12em; color: var(--ink-soft); padding: 14px 10px 4px; }
+.side a { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 10px; border-radius: 4px; color: var(--ink); text-decoration: none; font-size: 14px; }
+.side a:hover { background: var(--accent-soft); }
+.side a[aria-current="page"] { background: var(--accent); color: var(--sheet); font-weight: 500; }
+.side .badge { font-family: var(--font-num); font-size: 11px; min-width: 20px; text-align: center; padding: 0 6px; border-radius: 999px; background: var(--bad); color: #fff; }
+.app .wrap { max-width: 1240px; width: 100%; align-content: start; }
+.app .panel { align-content: start; }
+.view:not(.on) { display: none !important; }
+.view { display: grid; gap: 22px; min-width: 0; }
+@media (max-width: 900px) {
+  .app { grid-template-columns: 1fr; }
+  .side { position: sticky; z-index: 15; height: auto; display: flex; overflow-x: auto; padding: 8px 12px; border-right: 0; border-bottom: 1px solid var(--rule); }
+  .side .brand, .side .group { display: none; }
+  .side a { white-space: nowrap; }
+}
+/* 月次入力の作成（ウィザード） */
+.steps { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none; counter-reset: st; }
+.steps li { counter-increment: st; font-size: 13px; padding: 5px 12px 5px 8px; border-radius: 999px; border: 1px solid var(--rule); color: var(--ink-soft); background: var(--sheet); }
+.steps li::before { content: counter(st); display: inline-grid; place-items: center; width: 20px; height: 20px; margin-right: 6px; border-radius: 50%; background: var(--rule); color: var(--ink); font-family: var(--font-num); font-size: 12px; }
+.steps li.done { color: var(--ok); }
+.steps li.done::before { background: var(--ok-soft); color: var(--ok); }
+.steps li.now { color: var(--sheet); background: var(--accent); border-color: var(--accent); font-weight: 500; }
+.steps li.now::before { background: var(--sheet); color: var(--accent); }
+.wz-pick { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 10px; }
+.wz-pick button { text-align: left; font: inherit; cursor: pointer; background: var(--paper); border: 1px solid var(--rule); border-radius: 4px; padding: 10px 12px; color: var(--ink); display: grid; gap: 2px; }
+.wz-pick button:hover { border-color: var(--accent); }
+.wz-pick button b { font-weight: 500; }
+.wz-pick button span { font-size: 12px; color: var(--ink-soft); }
+.wz-nav { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between; border-top: 1px solid var(--rule); padding-top: 14px; }
+.wz-sum th { width: 12em; font-weight: 500; color: var(--ink-soft); font-size: 13px; vertical-align: top; }
+.wz-sum { min-width: 0; }
 </style>
 </head>
 <body>
 
+<div class="app">
+<nav class="side" id="side" aria-label="画面の切り替え">
+  <div class="brand">事務所用<br>仕訳変換</div>
+  <a href="#overview" data-nav="overview">提出の状況<span class="badge" id="navNew" hidden></span></a>
+  <span class="group">選んでいる顧問先</span>
+  <a href="#journal" data-nav="journal">仕訳変換・CSV</a>
+  <a href="#requests" data-nav="requests">修正依頼<span class="badge" id="navReq" hidden></span></a>
+  <a href="#settings" data-nav="settings">顧問先ページの設定</a>
+  <a href="#accounts" data-nav="accounts">科目一覧・過去の仕訳</a>
+  <span class="group">顧問先の管理</span>
+  <a href="#wizard" data-nav="wizard">月次入力の作成</a>
+  <a href="#clients" data-nav="clients">顧問先とメールアドレス</a>
+</nav>
 <div class="wrap">
   <div class="reload-bar" id="reloadBar" hidden><span id="reloadMsg"></span><button type="button" class="btn" id="reloadBtn">読み込み直す</button></div>
 
-  <header class="top">
+  <header class="top" id="topBar">
     <div style="display:grid;gap:2px;min-width:0">
       <span class="eyebrow">事務所用　仕訳変換</span>
       <h1><span id="clientTitle">顧問先を選んでください</span>　<span id="monthLabel"></span></h1>
@@ -170,16 +219,15 @@ html, body { margin: 0; }
     </div>
   </header>
 
-  <section class="panel" id="overview">
+  <section class="panel view" data-view="overview" id="overview">
     <div class="head"><h2 id="ovTitle">提出の状況</h2><span class="hint" id="ovNote"></span></div>
     <div class="table-box"><table id="ovTable"></table></div>
   </section>
 
-  <section class="admin" style="display:grid;gap:10px">
-    <details id="reqBox"><summary id="reqSummary">修正依頼</summary><div id="reqList"></div></details>
-    <details id="clientBox"><summary>顧問先とログインできるメールアドレス</summary>
+  <section class="panel view" data-view="requests" id="reqBox"><h2 id="reqSummary">修正依頼</h2><div id="reqList"></div></section>
+  <section class="panel view" data-view="clients" id="clientBox"><h2>顧問先とログインできるメールアドレス</h2>
       <div class="table-box"><table id="clientTable"></table></div>
-      <p class="hint">事務所のスタッフ（設定ファイルの STAFF_EMAILS）は、ここに登録しなくても、すべての顧問先のページに入れます。</p>
+      <p class="hint">事務所のスタッフ（設定ファイルの STAFF_EMAILS）は、ここに登録しなくても、すべての顧問先のページに入れます。新しい顧問先は「月次入力の作成」で、帳簿やメールアドレスまでまとめて作れます。</p>
       <div class="fields">
         <label class="f" for="nc-name">新しい顧問先の名前<input type="text" id="nc-name" placeholder="例：株式会社〇〇"></label>
         <label class="f" for="nc-sub">サブドメイン（空欄なら自動で決める）<input type="text" id="nc-sub" placeholder="例：c-7f3k"></label>
@@ -190,10 +238,18 @@ html, body { margin: 0; }
         <label class="f" for="nm-email">選んでいる顧問先に、ログインできるメールアドレスを追加<input type="text" id="nm-email" inputmode="email" placeholder="例：keiri@example.com"></label>
       </div>
       <div class="foot"><span class="msg" id="nmMsg" role="status"></span><button type="button" class="btn ghost" id="nmAdd">メールアドレスを追加する</button></div>
-    </details>
-    <details id="cfgBox" hidden><summary>顧問先ページの設定（出納帳の種類と入力の方法）</summary><div id="cfgEdit" style="display:grid;gap:12px"></div></details>
+  </section>
+  <section class="panel view" data-view="settings"><h2>顧問先ページの設定（出納帳の種類と入力の方法）</h2>
+    <p class="hint" id="cfgNone"></p>
+    <div id="cfgBox" hidden><div id="cfgEdit" style="display:grid;gap:12px"></div></div>
+  </section>
+  <section class="panel view" data-view="wizard" id="wizard"><h2>月次入力の作成</h2>
+    <ol class="steps" id="wzSteps"></ol>
+    <div id="wzBody" style="display:grid;gap:14px"></div>
+    <div class="wz-nav"><button type="button" class="btn ghost" id="wzBack">戻る</button><span class="msg" id="wzMsg" role="status"></span><button type="button" class="btn" id="wzNext">次へ</button></div>
   </section>
 
+  <div class="view" data-view="journal">
   <p class="hint" id="tplNote" hidden></p>
   <div id="main" hidden style="display:grid;gap:22px">
   <section class="status">
@@ -213,7 +269,7 @@ html, body { margin: 0; }
   <p class="hint">赤い行は科目が未設定です。科目を選ぶと、同じ内容の取引には次回から自動で同じ科目が入ります。税区分は顧問先が入力した税率から自動で入ります。必要なら直してください。</p>
   <div class="table-box"><table id="journal"></table></div>
 
-  <div class="two">
+  <div>
     <section class="panel">
       <h2 id="csvTitle">取込用CSV</h2>
       <fieldset class="checks" style="border:0;padding:0;margin:0"><span>会計ソフト</span>
@@ -252,7 +308,13 @@ html, body { margin: 0; }
       </details>
     </section>
 
-    <section class="panel">
+  </div>
+
+  </div>
+  </div>
+  <div class="view" data-view="accounts">
+    <p class="hint" id="acctNone" hidden>顧問先を選んでください。</p>
+    <section class="panel" id="acctPanel">
       <h2>科目一覧</h2>
       <p class="hint">会計ソフトの科目コードと名称です。足りない科目はここに追加してください。「税なし」にした科目は、選ぶと課区が対象外になります。</p>
       <div class="table-box"><table class="accts" id="accts"></table></div>
@@ -277,9 +339,8 @@ html, body { margin: 0; }
       </div>
     </section>
   </div>
-
-  </div>
   <footer>顧問先ページで入力・提出されたデータを読み込んで、仕訳にしています。</footer>
+</div>
 </div>
 
 <script src="/lib/payroll.js"></script>
@@ -780,7 +841,9 @@ html, body { margin: 0; }
   function render() {
     const canJournal = !!current && JOURNAL_TEMPLATES.includes(current.template || 'peters');
     $('main').hidden = !canJournal;
-    $('tplNote').hidden = !current || canJournal;
+    $('tplNote').hidden = canJournal;
+    if (!current) $('tplNote').textContent = '上で顧問先を選ぶか、「提出の状況」から帳簿を選んでください。';
+    $('acctPanel').hidden = !current; $('acctNone').hidden = !!current;
     if (current && !canJournal) $('tplNote').textContent = `${current.name} の画面（${templates[current.template] || current.template}）用の仕訳変換はまだありません。修正依頼の承認とメールアドレスの登録はできます。`;
     renderAdmin();
     if (!canJournal) return;
@@ -1194,6 +1257,8 @@ html, body { margin: 0; }
 
   function renderCfg() {
     $('cfgBox').hidden = !isStd();
+    $('cfgNone').hidden = isStd();
+    $('cfgNone').textContent = !current ? '上で顧問先を選んでください。' : `${current.name} の画面（${templates[current.template] || current.template}）には、ここで決める設定はありません。標準の画面の顧問先だけ設定できます。`;
     if (!isStd()) return;
     if (!cfgDraft) loadCfgDraft();
     const C = cfgDraft;
@@ -1429,7 +1494,7 @@ html, body { margin: 0; }
     $('reqSummary').textContent = current ? `修正依頼（承認待ち ${pend.length}件）` : '修正依頼';
     $('reqList').innerHTML = !current ? '<p class="hint">顧問先を選んでください。</p>' : pend.length ? `<div class="table-box"><table><thead><tr><th>月</th><th>帳簿</th><th>依頼の内容</th><th>依頼日時</th><th></th></tr></thead><tbody>${pend.map(p =>
       `<tr><td>${Number(p.m.slice(5))}月分</td><td>${p.r.book ? BOOKS[p.r.book] : 'すべて'}</td><td>${esc(p.r.reason)}</td><td>${esc(p.r.at)}</td><td><button type="button" class="btn" data-approve="${p.m}" data-idx="${p.i}">承認してロックを外す</button></td></tr>`).join('')}</tbody></table></div>` : '<p class="hint">承認待ちの依頼はありません。</p>';
-    if (pend.length) $('reqBox').open = true;
+    $('navReq').hidden = !pend.length; $('navReq').textContent = pend.length;
   }
 
   // メールアドレスごとに使える出納帳（標準の画面で、選んでいる顧問先のとき）。押したらすぐ保存する
@@ -1529,6 +1594,7 @@ html, body { margin: 0; }
     $('ovTitle').innerHTML = `提出の状況${newCount ? `　<span class="newcount">新しい提出が ${newCount} 件あります</span>` : ''}`;
     $('ovNote').textContent = `${new Date(overview.at).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })} 現在。押すとその帳簿を開きます。`;
     document.title = `${newCount ? `（${newCount}）` : ''}事務所用 仕訳変換`;
+    $('navNew').hidden = !newCount; $('navNew').textContent = newCount;
   }
   async function loadOverview() {
     const r = await api(`/api/office/overview?months=${OV_MONTHS().join(',')}`);
@@ -1549,7 +1615,7 @@ html, body { margin: 0; }
     setMonth(t.dataset.m); book = t.dataset.b;
     if (current?.id !== t.dataset.ov) await openClient(t.dataset.ov).catch(err => showReload(err.message));
     else render();
-    $('main').scrollIntoView({ block: 'start' });
+    location.hash = '#journal';
   });
 
   // 顧問先が送ったデータを読み込み直す（科目の設定などを保存中のときは待つ）
@@ -1621,12 +1687,276 @@ html, body { margin: 0; }
     }
   });
 
+  /* ---------- 月次入力の作成（ウィザード）：顧問先ごとに、帳簿・給与・メールアドレスを順に決めて作る ---------- */
+
+  const WZ_STEPS = ['顧問先', '使う帳簿', '帳簿ごとの詳細', '給与', 'メールアドレス', '確認して作成'];
+  const clone = v => JSON.parse(JSON.stringify(v));
+  let wz = null;
+  function wzReset() {
+    wz = { step: 0, mode: 'new', cid: '', name: '', sub: '', books: [clone(DEFAULT_BOOK)], fyStart: 4, payOn: false,
+      payroll: { name: '給与', acctPay: '318', tax: { ...Payroll.DEFAULT_TAX } }, pay: { rates: { ...Payroll.DEFAULT_RATES }, closeDay: 0, payLag: 0, payDay: 25, lag: 1 },
+      emails: [], accts: DEFAULT_ACCTS.map(a => ({ ...a })), used: new Set(), done: null };
+  }
+  // 登録済みの顧問先（標準の画面）の今の設定を読み込む
+  async function wzLoad(cid) {
+    const c = clients.find(x => x.id === cid), d = (await api(`/api/office/clients/${cid}/state`)).docs;
+    const cfg = d.config?.data || {}, old = cfg.payroll || {};
+    wz.cid = cid; wz.name = c.name;
+    wz.books = clone(cfg.cashbooks?.length ? cfg.cashbooks : [DEFAULT_BOOK]);
+    wz.fyStart = cfg.fyStart || 4;
+    wz.payOn = !!old.enabled;
+    wz.payroll = { name: old.name || '給与', acctPay: old.acctPay || '318', tax: { ...Payroll.DEFAULT_TAX, ...old.tax } };
+    wz.pay = clone(d.master?.data?.paySettings || Object.fromEntries(Payroll.SHARED_KEYS.filter(k => old[k] !== undefined).map(k => [k, old[k]])));
+    wz.pay = { closeDay: 0, payLag: 0, payDay: 25, lag: 1, ...wz.pay, rates: { ...Payroll.DEFAULT_RATES, ...wz.pay.rates } };
+    wz.emails = c.emails.map(em => ({ email: em, old: true, books: cfg.access?.[em] ? [...cfg.access[em]] : null }));
+    wz.accts = d.office ? withDefaults({ ...defaultOffice(c.name), ...d.office.data }).accts : DEFAULT_ACCTS.map(a => ({ ...a }));
+    wz.used = new Set(Object.entries(d).filter(([k]) => k.startsWith('m:')).flatMap(([, x]) => Object.entries(x.data.cb || {}).filter(([, v]) => v?.rows?.length || v?.count).map(([b]) => b)));
+  }
+  const wzBooks = () => accessBooks({ cashbooks: wz.books, payroll: { enabled: wz.payOn, name: wz.payroll.name } });
+  const wzAcct = sel => `<option value="">科目を選ぶ</option>` + wz.accts.map(a => `<option value="${a.code}"${a.code === sel ? ' selected' : ''}>${a.code} ${esc(a.name)}</option>`).join('');
+  const bookType = b => b.type === 'bank' ? '通帳' : b.type === 'custom' ? (b.mode === 'form' ? '自由項目（月1回の用紙）' : '自由項目（表）') : b.kinds?.includes('exp') ? '現金（経費精算）' : '現金出納帳';
+
+  function renderWizard() {
+    if (!wz) wzReset();
+    $('wzSteps').innerHTML = WZ_STEPS.map((t, k) => `<li class="${k === wz.step ? 'now' : k < wz.step ? 'done' : ''}"${k === wz.step ? ' aria-current="step"' : ''}>${t}</li>`).join('');
+    $('wzMsg').className = 'msg'; $('wzMsg').textContent = '';
+    $('wzBack').hidden = wz.step === 0 || !!wz.done;
+    $('wzNext').textContent = wz.done ? '別の顧問先を作る' : wz.step === WZ_STEPS.length - 1 ? (wz.mode === 'new' ? 'この内容で作成する' : 'この内容で保存する') : '次へ';
+    const B = $('wzBody'), chk = (attr, on, label) => `<label class="check"><input type="checkbox" ${attr}${on ? ' checked' : ''}>${label}</label>`;
+    const host = location.hostname.split('.').slice(1).join('.');
+    if (wz.done) {
+      const c = clients.find(x => x.id === wz.done);
+      B.innerHTML = `<p class="msg ok" style="font-size:15px">${esc(c?.name || '')} の月次入力を${wz.mode === 'new' ? '作成' : '保存'}しました。</p>
+        ${c ? `<p>顧問先のページ：<a href="https://${esc(c.subdomain)}.${esc(host)}/" target="_blank" rel="noopener"><code>https://${esc(c.subdomain)}.${esc(host)}</code></a></p>` : ''}
+        <p class="hint">登録したメールアドレスの人が、このアドレスを開いて入力します。自由項目の項目と仕訳、記入の細かい設定は「顧問先ページの設定」で直せます。</p>
+        <div style="display:flex;flex-wrap:wrap;gap:10px"><a class="btn ghost" href="#settings">顧問先ページの設定を開く</a><a class="btn ghost" href="#journal">仕訳変換を開く</a></div>`;
+      return;
+    }
+    if (wz.step === 0) {
+      const std = clients.filter(c => c.template === 'std');
+      B.innerHTML = `<p class="hint">顧問先が毎月入力するページ（標準の画面）を、順番に決めて作ります。最後の確認の画面で「作成する」を押すまでは、何も保存しません。</p>
+        <fieldset class="checks" style="border:0;padding:0;margin:0"><span>作るもの</span>
+          <label class="check"><input type="radio" name="wz-mode" value="new"${wz.mode === 'new' ? ' checked' : ''}>新しい顧問先</label>
+          <label class="check"><input type="radio" name="wz-mode" value="edit"${wz.mode === 'edit' ? ' checked' : ''}${std.length ? '' : ' disabled'}>登録済みの顧問先の設定を作り直す</label>
+        </fieldset>
+        ${wz.mode === 'new' ? `<div class="fields">
+          <label class="f" for="wz-name">顧問先の名前<input type="text" id="wz-name" data-w="name" value="${esc(wz.name)}" placeholder="例：株式会社〇〇"></label>
+          <label class="f" for="wz-sub">サブドメイン（空欄なら自動で決める）<input type="text" id="wz-sub" data-w="sub" value="${esc(wz.sub)}" placeholder="例：c-7f3k"></label>
+        </div><p class="hint">ページのアドレスは https://サブドメイン.${esc(host)}/ になります。英小文字・数字・ハイフンで入力してください。</p>`
+        : `<label class="f" for="wz-cid" style="max-width:420px">顧問先（標準の画面）<select id="wz-cid" data-w="cid"><option value="">選ぶ</option>${std.map(c => `<option value="${c.id}"${wz.cid === c.id ? ' selected' : ''}>${esc(c.name)}</option>`).join('')}</select></label>
+          <p class="hint">今の設定を読み込んで、順に直せます。記入がある帳簿は外せません。</p>`}`;
+    } else if (wz.step === 1) {
+      B.innerHTML = `<p class="hint">顧問先が使う帳簿を選びます。同じ種類をいくつでも足せます（例：現金出納帳を店ごとに2つ）。帳簿ごとに別々に提出します。</p>
+        <div class="table-box"><table class="accts"><thead><tr><th>帳簿</th><th>種類</th><th></th></tr></thead><tbody>
+          ${wz.books.map((b, i) => `<tr><td>${esc(b.name)}</td><td>${bookType(b)}</td><td>${wz.used.has(b.id) ? '<span class="hint">記入があるので外せません</span>' : `<button type="button" class="link-btn danger" data-wzrm="${i}">外す</button>`}</td></tr>`).join('') || '<tr><td colspan="3" class="hint">まだありません。下から選んでください。</td></tr>'}
+        </tbody></table></div>
+        <h3 style="margin:0;font-size:14px">帳簿を足す</h3>
+        <div class="wz-pick">${Object.entries(PRESETS).map(([k, [label, p]]) => { const [, t, d] = label.match(/^(.*?)（([^（]*)）$/) || [, label, '']; return `<button type="button" data-wzadd="${k}"><b>＋ ${p.type ? '' : '現金出納帳：'}${esc(t)}</b><span>${esc(d)}</span></button>`; }).join('')}</div>
+        <div class="checks" style="border-top:1px solid var(--rule);padding-top:12px">${chk('data-w="payOn"', wz.payOn, '給与計算も使う（一人ずつ入力して、明細・賃金台帳・仕訳を出す）')}</div>`;
+    } else if (wz.step === 2) {
+      B.innerHTML = `<label class="f" for="wz-fy" style="max-width:260px">事業年度の始まりの月（年間一覧）<select id="wz-fy" data-w="fyStart">${Array.from({ length: 12 }, (_, k) => `<option value="${k + 1}"${Number(wz.fyStart) === k + 1 ? ' selected' : ''}>${k + 1}月</option>`).join('')}</select></label>
+        ${wz.books.map((b, i) => {
+          const f = (key, label, v, extra = '') => `<label class="f" for="wz-${i}-${key}">${label}<input type="text" id="wz-${i}-${key}" data-wb="${i}:${key}" value="${esc(v ?? '')}" ${extra}></label>`;
+          const head = `<legend>${esc(bookType(b))}</legend><div class="fields">${f('name', '名前', b.name)}`;
+          if (b.type === 'custom') return `<fieldset class="cfg-book">${head}
+            <label class="f" for="wz-${i}-mode">形<select id="wz-${i}-mode" data-wb="${i}:mode"><option value="table"${b.mode !== 'form' ? ' selected' : ''}>表（1行ずつ足す）</option><option value="form"${b.mode === 'form' ? ' selected' : ''}>月1回の用紙</option></select></label></div>
+            <p class="hint">項目：${(b.fields || []).map(x => esc(x.label)).join('・')}。項目と仕訳の科目は、作成したあと「顧問先ページの設定」で決めます。</p></fieldset>`;
+          const bank = b.type === 'bank';
+          return `<fieldset class="cfg-book">${head}
+            <label class="f" for="wz-${i}-acct">会計ソフトの科目（この${bank ? '預金' : '現金'}）<select id="wz-${i}-acct" data-wb="${i}:acct">${wzAcct(b.acct || (bank ? BANK : CASH))}</select></label>
+            ${f('opening', '使い始める前の残高（円）', Number(b.opening) || 0, 'inputmode="numeric"')}
+            ${f('sub', '補助コード（任意）', b.sub, 'inputmode="numeric"')}${f('subName', '補助の名前（任意）', b.subName)}
+            ${bank ? f('bankCode', '銀行コード（MJS・任意）', b.bankCode, 'inputmode="numeric"') + f('bankName', '銀行の名前（MJS・任意）', b.bankName) : ''}
+            </div>
+            ${bank ? `<div class="checks"><span>入力する項目</span>${chk(`data-wb="${i}:col:partner"`, b.cols?.partner, '相手先')}${chk(`data-wb="${i}:col:acct"`, b.cols?.acct, '科目')}</div>` : `
+            <div class="checks"><span>記入の種類</span>${Object.entries(KIND_NAMES).map(([k, l]) => chk(`data-wb="${i}:kind:${k}"`, b.kinds?.includes(k), l)).join('')}</div>
+            <div class="checks"><span>入力する項目</span>${Object.entries(COL_NAMES).map(([k, l]) => chk(`data-wb="${i}:col:${k}"`, b.cols?.[k], l)).join('')}</div>
+            <div class="checks">${chk(`data-wb="${i}:count"`, b.count !== false, '提出の前に現金残高確認票を記入する')}${chk(`data-wb="${i}:expPrint"`, b.expPrint !== false, '経費精算書を印刷できるようにする')}</div>`}
+          </fieldset>`;
+        }).join('')}`;
+    } else if (wz.step === 3) {
+      if (!wz.payOn) { B.innerHTML = '<p class="hint">給与計算は使いません。使うときは「戻る」で「使う帳簿」に戻って、給与計算にチェックしてください。</p>'; return; }
+      const p = wz.pay, r = p.rates;
+      const daySel = (key, label, v) => `<label class="f" for="wz-p-${key}">${label}<select id="wz-p-${key}" data-wp="${key}"><option value="0"${!Number(v) ? ' selected' : ''}>末日</option>${Array.from({ length: key === 'closeDay' ? 28 : 31 }, (_, k) => `<option value="${k + 1}"${Number(v) === k + 1 ? ' selected' : ''}>${k + 1}日</option>`).join('')}</select></label>`;
+      const num = (key, label, v, ph = '') => `<label class="f" for="wz-p-${key}">${label}<input type="number" step="any" id="wz-p-${key.replace('.', '-')}" data-wp="${key}" value="${v ?? ''}" placeholder="${ph}"></label>`;
+      B.innerHTML = `<div class="fields">
+          <label class="f" for="wz-p-name">タブの名前<input type="text" id="wz-p-name" data-wp="name" value="${esc(wz.payroll.name)}"></label>
+          ${daySel('closeDay', '締め日', p.closeDay)}
+          <label class="f" for="wz-p-payLag">支払う月<select id="wz-p-payLag" data-wp="payLag"><option value="0"${!Number(p.payLag) ? ' selected' : ''}>締め日と同じ月（当月払い）</option><option value="1"${Number(p.payLag) ? ' selected' : ''}>締め日の翌月（翌月払い）</option></select></label>
+          ${daySel('payDay', '支給日', p.payDay)}
+          <label class="f" for="wz-p-lag">社会保険料の引き方<select id="wz-p-lag" data-wp="lag"><option value="1"${p.lag == 1 ? ' selected' : ''}>翌月徴収（前月分を引く）</option><option value="0"${p.lag == 0 ? ' selected' : ''}>当月徴収（その月の分を引く）</option></select></label>
+          <label class="f" for="wz-p-acctPay">未払の科目（給与の相手科目）<select id="wz-p-acctPay" data-wp="acctPay">${wzAcct(wz.payroll.acctPay)}</select></label>
+        </div>
+        <p class="hint" id="wzPayRule">${esc(Payroll.ruleText(p))}</p>
+        <p class="hint">料率は年度や都道府県で変わります。協会けんぽ・年金機構・厚労省の今年度の料率を入れてください（労使合計の料率）。あとから顧問先のページでも直せます。</p>
+        <div class="fields">
+          ${num('ratesYear', '料率の年度（例：2026）', p.ratesYear, String(new Date().getFullYear()))}
+          ${num('rates.health', '健康保険料率（％）', r.health, '例：9.85')}
+          ${num('rates.care', '介護保険料率（％）', r.care, '例：1.59')}
+          ${num('rates.kids', '子ども・子育て支援金率（％）', r.kids, '令和8年度から')}
+          ${num('rates.pension', '厚生年金保険料率（％）', r.pension)}
+          ${num('rates.emp', '雇用保険料率（労働者負担・千分の）', r.emp, '例：5.5')}
+        </div>`;
+    } else if (wz.step === 4) {
+      const books = wzBooks();
+      B.innerHTML = `<p class="hint">顧問先のページにログインできるメールアドレスと、その人が使える帳簿を決めます。全部にチェックすると、あとで足した帳簿も使えます。メールアドレスはあとからでも足せます。</p>
+        <div class="table-box"><table class="accts"><thead><tr><th>メールアドレス</th><th>使える帳簿</th><th></th></tr></thead><tbody>
+          ${wz.emails.map((m, k) => `<tr><td>${esc(m.email)}${m.old ? '<div class="hint">登録済み</div>' : ''}</td>
+            <td><div class="checks">${books.map(b => chk(`data-we="${k}" data-book="${esc(b.id)}"`, !m.books || m.books.includes(b.id), esc(b.name))).join('')}</div></td>
+            <td>${m.old ? '' : `<button type="button" class="link-btn danger" data-wzrmmail="${k}">外す</button>`}</td></tr>`).join('') || '<tr><td colspan="3" class="hint">まだありません</td></tr>'}
+        </tbody></table></div>
+        <div class="fields" style="grid-template-columns:minmax(0,1fr) auto;align-items:end">
+          <label class="f" for="wz-email">メールアドレスを足す<input type="text" id="wz-email" inputmode="email" placeholder="例：keiri@example.com"></label>
+          <button type="button" class="btn ghost" id="wzAddMail">足す</button>
+        </div>`;
+    } else {
+      const books = wzBooks(), name = id => books.find(b => b.id === id)?.name || id;
+      const acctName = c => { const a = wz.accts.find(x => x.code === c); return a ? `${a.code} ${a.name}` : c || '未設定'; };
+      const row = (h, v) => `<tr><th scope="row">${h}</th><td>${v}</td></tr>`;
+      B.innerHTML = `<p class="hint">この内容で${wz.mode === 'new' ? '作成' : '保存'}します。よければ下のボタンを押してください。</p>
+        <div class="table-box"><table class="wz-sum"><tbody>
+          ${row('顧問先', `${esc(wz.name)}${wz.mode === 'new' ? `（新規・サブドメイン ${esc(wz.sub || '自動')}）` : ''}`)}
+          ${row('事業年度の始まり', `${wz.fyStart}月`)}
+          ${wz.books.map((b, i) => row(`帳簿 ${i + 1}`, `<b>${esc(b.name)}</b>（${bookType(b)}）${b.type === 'custom' ? `<div class="hint">項目：${(b.fields || []).map(x => esc(x.label)).join('・')}</div>` : `<div class="hint">科目 ${esc(acctName(b.acct))}${b.sub ? `・補助 ${esc(b.sub)}` : ''}${b.bankCode ? `・銀行 ${esc(b.bankCode)}` : ''}・始める前の残高 ${yen(Number(b.opening) || 0)}円${b.type === 'bank' ? '' : `・${b.kinds.map(k => KIND_NAMES[k]).join('・')}`}</div>`}`)).join('')}
+          ${row('給与計算', wz.payOn ? `使う（${esc(wz.payroll.name)}）<div class="hint">${esc(Payroll.ruleText(wz.pay))}・未払 ${esc(acctName(wz.payroll.acctPay))}</div>` : '使わない')}
+          ${row('メールアドレス', wz.emails.map(m => `<div>${esc(m.email)}${m.old ? '' : '（新しく登録）'}<span class="hint">：${!m.books || m.books.length === books.length ? 'すべての帳簿' : m.books.map(name).map(esc).join('・')}</span></div>`).join('') || '<span class="hint">なし（あとで「顧問先とメールアドレス」で足せます）</span>')}
+        </tbody></table></div>`;
+    }
+  }
+
+  $('wzBody').addEventListener('input', e => {
+    const t = e.target;
+    if (t.dataset.w) {
+      const k = t.dataset.w;
+      if (k === 'payOn') wz.payOn = t.checked;
+      else if (k === 'fyStart') wz.fyStart = Number(t.value);
+      else wz[k] = t.value;
+      return;
+    }
+    if (t.dataset.wb) {
+      const [i, key, sub] = t.dataset.wb.split(':'), b = wz.books[Number(i)];
+      if (key === 'kind') b.kinds = Object.keys(KIND_NAMES).filter(x => x === sub ? t.checked : b.kinds.includes(x));
+      else if (key === 'col') b.cols = { ...b.cols, [sub]: t.checked };
+      else if (key === 'count' || key === 'expPrint') b[key] = t.checked;
+      else if (key === 'opening') b.opening = Math.round(Number(String(t.value).replace(/[,，]/g, ''))) || 0;
+      else b[key] = t.value;
+      return;
+    }
+    if (t.dataset.wp) {
+      const key = t.dataset.wp;
+      if (key === 'name' || key === 'acctPay') { wz.payroll[key] = t.value; return; }
+      const v = t.value === '' ? '' : Number(t.value);
+      if (key.startsWith('rates.')) wz.pay.rates[key.slice(6)] = v; else wz.pay[key] = v;
+      if ($('wzPayRule')) $('wzPayRule').textContent = Payroll.ruleText(wz.pay);
+      return;
+    }
+    if (t.dataset.we) {
+      const m = wz.emails[Number(t.dataset.we)], ids = wzBooks().map(b => b.id), cur = m.books || ids;
+      const next = ids.filter(id => id === t.dataset.book ? t.checked : cur.includes(id));
+      m.books = next.length === ids.length ? null : next;
+    }
+  });
+  $('wzBody').addEventListener('change', e => {
+    if (e.target.name === 'wz-mode') { wz.mode = e.target.value; wz.cid = ''; renderWizard(); }
+  });
+  $('wzBody').addEventListener('click', e => {
+    const t = e.target.closest('button'); if (!t) return;
+    if (t.dataset.wzadd) {
+      const [, p] = PRESETS[t.dataset.wzadd];
+      let n = wz.books.length + 1, bid = wz.books.some(b => b.id === 'main') ? '' : 'main';
+      while (!bid || wz.books.some(b => b.id === bid)) bid = 'b' + n++;
+      wz.books.push({ ...clone(p), id: bid, acct: p.acct || CASH, opening: 0, depts: [] });
+      renderWizard(); return;
+    }
+    if (t.dataset.wzrm !== undefined) { wz.books.splice(Number(t.dataset.wzrm), 1); renderWizard(); return; }
+    if (t.dataset.wzrmmail !== undefined) { wz.emails.splice(Number(t.dataset.wzrmmail), 1); renderWizard(); return; }
+    if (t.id === 'wzAddMail') {
+      const em = $('wz-email').value.trim().toLowerCase();
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(em)) { $('wzMsg').textContent = 'メールアドレスを正しく入力してください。'; return; }
+      if (wz.emails.some(m => m.email === em)) { $('wzMsg').textContent = 'そのメールアドレスはもう入っています。'; return; }
+      wz.emails.push({ email: em, old: false, books: null }); renderWizard(); $('wz-email').focus();
+    }
+  });
+  $('wzBack').addEventListener('click', () => { if (wz.step > 0) { wz.step--; renderWizard(); } });
+  $('wzNext').addEventListener('click', async () => {
+    const m = $('wzMsg'), err = t => { m.className = 'msg'; m.textContent = t; };
+    if (wz.done) { wzReset(); renderWizard(); return; }
+    if (wz.step === 0) {
+      if (wz.mode === 'new') {
+        if (!wz.name.trim()) return err('顧問先の名前を入力してください。');
+        if (wz.sub && !/^[a-z0-9][a-z0-9-]{1,30}$/.test(wz.sub.trim())) return err('サブドメインは英小文字・数字・ハイフンで入力してください。');
+        if (wz.sub && clients.some(c => c.subdomain === wz.sub.trim())) return err('そのサブドメインはすでに使われています。');
+      } else {
+        if (!wz.cid) return err('顧問先を選んでください。');
+        try { await wzLoad(wz.cid); } catch (e) { return err(e.message); }
+      }
+    }
+    if (wz.step === 1 && !wz.books.length) return err('帳簿を1つ以上選んでください。');
+    if (wz.step === 2) {
+      const bad = wz.books.find(b => !String(b.name).trim() || (b.type !== 'custom' && b.type !== 'bank' && !b.kinds.length));
+      if (bad) return err('帳簿ごとに、名前と記入の種類を1つ以上決めてください。');
+      const names = wz.books.map(b => b.name.trim());
+      if (new Set(names).size !== names.length) return err('同じ名前の帳簿があります。見分けられるように名前を変えてください。');
+    }
+    if (wz.step === 4) {
+      const none = wz.emails.find(x => x.books && !x.books.length);
+      if (none) return err(`${none.email} が使える帳簿が1つもありません。`);
+    }
+    if (wz.step < WZ_STEPS.length - 1) { wz.step++; renderWizard(); return; }
+    $('wzNext').disabled = true; m.className = 'msg'; m.textContent = '保存しています…';
+    try { await wzSave(); renderWizard(); }
+    catch (e) { err(e.message); }
+    finally { $('wzNext').disabled = false; }
+  });
+
+  async function wzSave() {
+    // 新しい顧問先は、ここで初めて作る（途中で失敗してやり直しても、二重に作らない）
+    if (wz.mode === 'new' && !wz.cid) {
+      const c = await api('/api/office/clients', { method: 'POST', body: JSON.stringify({ name: wz.name.trim(), subdomain: wz.sub.trim(), template: 'std' }) });
+      wz.cid = c.id;
+    }
+    const cid = wz.cid, d = (await api(`/api/office/clients/${cid}/state`)).docs;
+    const ids = wzBooks().map(b => b.id);
+    const access = Object.fromEntries(wz.emails.filter(x => x.books && x.books.length < ids.length).map(x => [x.email, x.books.filter(id => ids.includes(id))]));
+    const old = d.config?.data || {};
+    const payroll = wz.payOn ? { ...old.payroll, ...wz.payroll, enabled: true } : old.payroll ? { ...old.payroll, enabled: false } : undefined;
+    const data = { ...old, fyStart: wz.fyStart, cashbooks: wz.books, payroll, access, accts: wz.accts.map(a => ({ code: a.code, name: a.name })) };
+    await api(`/api/office/clients/${cid}/doc/config`, { method: 'PUT', body: JSON.stringify({ data, version: d.config?.version || 0 }) });
+    if (wz.payOn) {
+      const md = { ...(d.master?.data || {}), paySettings: { ...(d.master?.data?.paySettings || {}), ...wz.pay } };
+      await api(`/api/office/clients/${cid}/doc/master`, { method: 'PUT', body: JSON.stringify({ data: md, version: d.master?.version || 0 }) });
+    }
+    for (const x of wz.emails.filter(x => !x.old)) { await api(`/api/office/clients/${cid}/members`, { method: 'POST', body: JSON.stringify({ email: x.email }) }); x.old = true; }
+    await loadClients();
+    loadOverview().catch(() => {});
+    if (current?.id === cid) cfgDirty = false;
+    await openClient(cid);
+    wz.done = cid;
+  }
+
+  /* ---------- サイドバー（URL の # で画面を切り替える） ---------- */
+
+  const VIEWS = ['overview', 'journal', 'requests', 'settings', 'accounts', 'wizard', 'clients'];
+  // 顧問先を選ぶ欄は、選んでいる顧問先の画面と、メールアドレスの画面で出す
+  const NEED_CLIENT = ['journal', 'requests', 'settings', 'accounts', 'clients'];
+  function showView() {
+    const v = VIEWS.includes(location.hash.slice(1)) ? location.hash.slice(1) : 'overview';
+    document.querySelectorAll('.view').forEach(el => el.classList.toggle('on', el.dataset.view === v));
+    document.querySelectorAll('#side [data-nav]').forEach(a => { if (a.dataset.nav === v) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current'); });
+    $('topBar').hidden = !NEED_CLIENT.includes(v);
+    if (v === 'wizard') renderWizard();
+    window.scrollTo(0, 0);
+  }
+  window.addEventListener('hashchange', showView);
+  showView();
+
   (async () => {
     try {
       await loadClients();
       await loadOverview().catch(() => {});
+      if (location.hash === '#wizard') renderWizard();
       let last = ''; try { last = localStorage.getItem('office-client') || ''; } catch (e) {}
-      if (clients.some(c => c.id === last)) await openClient(last); else render();
+      if (clients.some(c => c.id === last)) await openClient(last); else { render(); renderCfg(); }
     } catch (err) { showReload(err.message || '読み込めませんでした。'); }
   })();
 })();
