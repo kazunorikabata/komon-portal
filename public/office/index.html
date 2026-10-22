@@ -170,7 +170,7 @@ html, body { margin: 0; }
   .side .brand, .side .group { display: none; }
   .side a { white-space: nowrap; }
 }
-/* 月次入力の作成（ウィザード） */
+/* 顧問先の設定（初回）のウィザードと、月次の作業 */
 .steps { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none; counter-reset: st; }
 .steps li { counter-increment: st; font-size: 13px; padding: 5px 12px 5px 8px; border-radius: 999px; border: 1px solid var(--rule); color: var(--ink-soft); background: var(--sheet); }
 .steps li::before { content: counter(st); display: inline-grid; place-items: center; width: 20px; height: 20px; margin-right: 6px; border-radius: 50%; background: var(--rule); color: var(--ink); font-family: var(--font-num); font-size: 12px; }
@@ -178,6 +178,9 @@ html, body { margin: 0; }
 .steps li.done::before { background: var(--ok-soft); color: var(--ok); }
 .steps li.now { color: var(--sheet); background: var(--accent); border-color: var(--accent); font-weight: 500; }
 .steps li.now::before { background: var(--sheet); color: var(--accent); }
+#mwSteps li { cursor: pointer; }
+#mwSteps li small { display: block; font-size: 11px; margin-left: 26px; opacity: .85; }
+#mwSteps li.bad:not(.now) { border-color: var(--bad); color: var(--bad); }
 .wz-pick { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 10px; }
 .wz-pick button { text-align: left; font: inherit; cursor: pointer; background: var(--paper); border: 1px solid var(--rule); border-radius: 4px; padding: 10px 12px; color: var(--ink); display: grid; gap: 2px; }
 .wz-pick button:hover { border-color: var(--accent); }
@@ -195,12 +198,13 @@ html, body { margin: 0; }
   <div class="brand">事務所用<br>仕訳変換</div>
   <a href="#overview" data-nav="overview">提出の状況<span class="badge" id="navNew" hidden></span></a>
   <span class="group">選んでいる顧問先</span>
+  <a href="#monthly" data-nav="monthly">月次の作業</a>
   <a href="#journal" data-nav="journal">仕訳変換・CSV</a>
   <a href="#requests" data-nav="requests">修正依頼<span class="badge" id="navReq" hidden></span></a>
   <a href="#settings" data-nav="settings">顧問先ページの設定</a>
   <a href="#accounts" data-nav="accounts">科目一覧・過去の仕訳</a>
   <span class="group">顧問先の管理</span>
-  <a href="#wizard" data-nav="wizard">月次入力の作成</a>
+  <a href="#wizard" data-nav="wizard">顧問先の設定（初回）</a>
   <a href="#clients" data-nav="clients">顧問先とメールアドレス</a>
 </nav>
 <div class="wrap">
@@ -228,7 +232,7 @@ html, body { margin: 0; }
   <section class="panel view" data-view="requests" id="reqBox"><h2 id="reqSummary">修正依頼</h2><div id="reqList"></div></section>
   <section class="panel view" data-view="clients" id="clientBox"><h2>顧問先とログインできるメールアドレス</h2>
       <div class="table-box"><table id="clientTable"></table></div>
-      <p class="hint">事務所のスタッフ（設定ファイルの STAFF_EMAILS）は、ここに登録しなくても、すべての顧問先のページに入れます。新しい顧問先は「月次入力の作成」で、帳簿やメールアドレスまでまとめて作れます。</p>
+      <p class="hint">事務所のスタッフ（設定ファイルの STAFF_EMAILS）は、ここに登録しなくても、すべての顧問先のページに入れます。新しい顧問先は「顧問先の設定（初回）」で、帳簿やメールアドレスまでまとめて作れます。</p>
       <div class="fields">
         <label class="f" for="nc-name">新しい顧問先の名前<input type="text" id="nc-name" placeholder="例：株式会社〇〇"></label>
         <label class="f" for="nc-sub">サブドメイン（空欄なら自動で決める）<input type="text" id="nc-sub" placeholder="例：c-7f3k"></label>
@@ -244,7 +248,7 @@ html, body { margin: 0; }
     <p class="hint" id="cfgNone"></p>
     <div id="cfgBox" hidden><div id="cfgEdit" style="display:grid;gap:12px"></div></div>
   </section>
-  <section class="panel view" data-view="wizard" id="wizard"><h2>月次入力の作成</h2>
+  <section class="panel view" data-view="wizard" id="wizard"><h2>顧問先の設定（初回）</h2>
     <ol class="steps" id="wzSteps"></ol>
     <div id="wzBody" style="display:grid;gap:14px"></div>
     <div class="wz-nav"><button type="button" class="btn ghost" id="wzBack">戻る</button><span class="msg" id="wzMsg" role="status"></span><button type="button" class="btn" id="wzNext">次へ</button></div>
@@ -253,6 +257,12 @@ html, body { margin: 0; }
   <div class="view" data-view="journal">
   <p class="hint" id="tplNote" hidden></p>
   <div id="main" hidden style="display:grid;gap:22px">
+  <section class="panel" id="mwBar" hidden>
+    <div class="head" style="display:flex;flex-wrap:wrap;gap:8px 16px;align-items:baseline;justify-content:space-between"><h2 id="mwTitle">月次の作業</h2><span class="hint">設定した順番に、1つずつ確認していきます。上の番号を押すと、その帳簿に移れます。</span></div>
+    <ol class="steps" id="mwSteps"></ol>
+    <div class="wz-nav" style="border-top:0;padding-top:0"><button type="button" class="btn ghost" id="mwBack">前へ</button><span class="msg" id="mwMsg" role="status"></span><button type="button" class="btn" id="mwNext">次へ</button></div>
+  </section>
+  <section class="panel" id="mwSum" hidden></section>
   <section class="status">
     <div class="chips" id="chips"></div>
     <button type="button" class="btn ghost" id="fillNext">未設定の行へ移動</button>
@@ -273,7 +283,7 @@ html, body { margin: 0; }
   <div class="table-box"><table id="journal"></table></div>
   </div>
 
-  <div>
+  <div id="csvArea">
     <section class="panel">
       <h2 id="csvTitle">取込用CSV</h2>
       <fieldset class="checks" style="border:0;padding:0;margin:0"><span>会計ソフト</span>
@@ -383,7 +393,7 @@ html, body { margin: 0; }
     if (isStd()) {
       const cfg = docs.config?.data || {};
       CFG = { fyStart: 4, ...cfg, cashbooks: cfg.cashbooks?.length ? cfg.cashbooks : [DEFAULT_BOOK] };
-      // 分類と順番（月次入力の作成で決めたもの）。事務所が会計ソフトに直接入力するものは 'dx:ID'
+      // 分類と順番（顧問先の設定（初回）で決めたもの）。事務所が会計ソフトに直接入力するものは 'dx:ID'
       BOOKS = Object.fromEntries(planItems(CFG).map(x => [(x.how === 'direct' ? 'dx:' : 'cb:') + x.id, (x.cat ? CATS[catOf(x)][0] + '：' : '') + x.name]));
       if (CFG.payroll?.enabled) BOOKS.pay = CFG.payroll.name || '給与';
       // 現金は、直前の現金残高確認で数えた額を起点にする（顧問先のページと同じ計算）
@@ -858,6 +868,62 @@ html, body { margin: 0; }
     if (overview) { ((overview.dones ||= {})[current.id] = state.done); renderOverview(); }
   });
 
+  /* ---------- 月次の作業：設定した順番に帳簿を1つずつ確認し、最後にまとめてCSVを保存する ---------- */
+
+  let mwCsv = false;
+  const mwOn = () => location.hash === '#monthly';
+  const csvTarget = () => mwOn() && mwCsv ? '*' : book;
+  const csvLabel = () => mwOn() && mwCsv ? 'この月のすべての帳簿' : BOOKS[book];
+  // 帳簿ごとの状態（提出・完了と、科目などが未設定の行の数）
+  function mwStatus(b) {
+    const d = CLIENT.month, sub = subMap(d.submitted);
+    if (b.startsWith('dx:')) { const at = state.done?.[THIS]?.[b.slice(3)]; return { ok: !!at, text: at ? '完了' : '未完了', need: 0, rows: 0 }; }
+    const js = journals(b), need = js.filter(rowProblem).length;
+    const pending = (d.requests || []).some(r => r.status === 'pending' && (!r.book || r.book === b));
+    const text = pending ? '修正依頼あり' : sub[b] ? (need ? `提出済・未設定 ${need}行` : '提出済') : '未提出';
+    return { ok: !!sub[b] && !need && !pending, text, need, rows: js.length, sub: !!sub[b] };
+  }
+  function renderMonthly() {
+    const on = mwOn() && !!current && !$('main').hidden;
+    $('mwBar').hidden = !on; $('tabs').hidden = on;
+    $('mwSum').hidden = !(on && mwCsv); $('csvArea').hidden = on && !mwCsv;
+    $('submitted').hidden = on && mwCsv;
+    if (!on) return;
+    const keys = Object.keys(BOOKS), at = mwCsv ? keys.length : keys.indexOf(book);
+    $('mwTitle').textContent = `月次の作業　${current.name} 様　${Y}年${M}月分`;
+    $('mwSteps').innerHTML = keys.map((b, k) => { const st = mwStatus(b); return `<li class="${k === at ? 'now' : st.ok ? 'done' : st.need ? 'bad' : ''}" data-mw="${esc(b)}">${esc(BOOKS[b])}<small>${esc(st.text)}</small></li>`; }).join('')
+      + `<li class="${mwCsv ? 'now' : ''}" data-mw="*">確認してCSV<small>最後に</small></li>`;
+    $('mwBack').disabled = at === 0;
+    const m = $('mwMsg'); m.className = 'msg'; m.textContent = '';
+    if (mwCsv) {
+      $('journalArea').hidden = $('directBox').hidden = $('payAlerts').hidden = true;
+      $('mwNext').hidden = true;
+      const rows = keys.map((b, k) => ({ b, k, st: mwStatus(b) }));
+      const left = rows.filter(r => !r.st.ok);
+      $('mwSum').innerHTML = `<h3>${Y}年${M}月分のまとめ</h3>
+        <div class="table-box"><table class="accts"><thead><tr><th>順番</th><th>帳簿</th><th>状態</th><th class="num">仕訳</th><th></th></tr></thead><tbody>
+          ${rows.map(r => `<tr><td>${r.k + 1}</td><td>${esc(BOOKS[r.b])}</td><td style="color:${r.st.ok ? 'var(--ok)' : 'var(--bad)'}">${esc(r.st.text)}</td><td class="num">${r.b.startsWith('dx:') ? '会計ソフトに直接' : r.st.rows + '行'}</td><td><button type="button" class="link-btn" data-mw="${esc(r.b)}">開く</button></td></tr>`).join('')}
+        </tbody></table></div>
+        <p class="${left.length ? 'msg' : 'msg ok'}">${left.length ? `まだ終わっていないものが ${left.length} 件あります（${left.map(r => esc(BOOKS[r.b])).join('・')}）。CSVには、今ある仕訳だけが入ります。` : 'すべて終わっています。下の「CSVを保存する」で、この月のすべての帳簿の仕訳を1つのCSVにして保存できます。'}</p>`;
+      return;
+    }
+    $('mwNext').hidden = false;
+    const st = mwStatus(book), dx = book.startsWith('dx:');
+    $('mwNext').textContent = dx && !st.ok ? '完了にして次へ' : at === keys.length - 1 ? '確認してCSVへ' : '次へ';
+    m.textContent = dx ? (st.ok ? '' : '会計ソフトに入力し終わったら「完了にして次へ」を押してください。')
+      : st.text === '未提出' ? 'まだ顧問先から提出されていません。提出を待つか、このまま次へ進めます。'
+      : st.need ? `科目などが未設定の行が ${st.need} 行あります（赤い行）。` : '';
+  }
+  const mwGo = b => { if (b === '*') mwCsv = true; else { mwCsv = false; book = b; } render(); window.scrollTo(0, 0); };
+  $('mwSteps').addEventListener('click', e => { const li = e.target.closest('[data-mw]'); if (li) mwGo(li.dataset.mw); });
+  $('mwSum').addEventListener('click', e => { const t = e.target.closest('[data-mw]'); if (t) mwGo(t.dataset.mw); });
+  $('mwBack').addEventListener('click', () => { const keys = Object.keys(BOOKS); mwGo(mwCsv ? keys[keys.length - 1] : keys[Math.max(0, keys.indexOf(book) - 1)]); });
+  $('mwNext').addEventListener('click', () => {
+    const keys = Object.keys(BOOKS), i = keys.indexOf(book);
+    if (book.startsWith('dx:') && !state.done?.[THIS]?.[book.slice(3)]) { ((state.done ||= {})[THIS] ||= {})[book.slice(3)] = stamp(); save(); if (overview) { (overview.dones ||= {})[current.id] = state.done; renderOverview(); } }
+    mwGo(i < keys.length - 1 ? keys[i + 1] : '*');
+  });
+
   function monthState() {
     const d = CLIENT.month, sub = subMap(d.submitted);
     if (book.startsWith('dx:')) { const at = state.done?.[THIS]?.[book.slice(3)]; return at ? { cls: '', label: `${BOOKS[book]}：会計ソフトに入力済み（完了 ${at}）` } : { cls: 'none', label: `${BOOKS[book]}：会計ソフトに未入力` }; }
@@ -922,7 +988,7 @@ html, body { margin: 0; }
     const al = book === 'pay' ? Payroll.alerts({ month: THIS, employees: CLIENT.employees, rowOf: (mm, id) => docs['m:' + mm]?.data?.pay?.rows?.[id], cfg: Payroll.settings(CFG.payroll, docs.master?.data?.paySettings) }) : [];
     $('payAlerts').hidden = !al.length;
     $('payAlerts').innerHTML = al.length ? `<div class="panel" style="border-color:var(--warn-fg)"><h3>給与のお知らせ（${al.length}件）</h3><ul style="margin:0;padding-left:1.2em;display:grid;gap:4px;font-size:13px">${al.map(a => `<li style="${a.level === 'warn' ? 'color:var(--bad);font-weight:500' : ''}">${esc(a.text)}</li>`).join('')}</ul></div>` : '';
-    renderAccts(); renderExport();
+    renderAccts(); renderExport(); renderMonthly();
   }
 
   function renderBal() {
@@ -965,7 +1031,7 @@ html, body { margin: 0; }
 
   function buildCsv(which) {
     const S = state.settings;
-    const js = journals(which);
+    const js = which === '*' ? Object.keys(BOOKS).flatMap(b => journals(b)) : journals(which);
     const problems = [];
     if (js.some(j => j.need && !j[j.need])) problems.push('科目が未設定の行があります。');
     if (js.some(j => j.amt <= 0 || (j.extra && (!j.dr || !j.cr)))) problems.push('金額が0の行か、借方・貸方の入っていない足した仕訳があります。');
@@ -1011,10 +1077,10 @@ html, body { margin: 0; }
     renderTekBox();
     const S = state.settings;
     for (const k of ['code', 'name', 'fy', 'skc', 'skn']) if (document.activeElement !== $('s-' + k)) $('s-' + k).value = S[k] || '';
-    const { text, problems } = buildCsv(book);
+    const { text, problems } = buildCsv(csvTarget());
     $('preview').textContent = text.split('\r\n').slice(0, 14).join('\n') + '\n…';
     const fmt = S.format === 'mjs' ? 'MJS' : 'JDL';
-    $('exportBtn').textContent = `${BOOKS[book]}のCSV（${fmt}）を保存する`;
+    $('exportBtn').textContent = `${csvLabel()}のCSV（${fmt}）を保存する`;
     $('csvTitle').textContent = `${fmt}取込用CSV`;
     $('s-fmt-' + (S.format || 'jdl')).checked = true;
     $('jdlOpts').hidden = fmt === 'MJS';
@@ -1253,13 +1319,13 @@ html, body { margin: 0; }
 
   $('exportBtn').addEventListener('click', async () => {
     const m = $('exportMsg');
-    const { text, problems, count } = buildCsv(book);
+    const { text, problems, count } = buildCsv(csvTarget());
     if (problems.length) { m.className = 'msg'; m.textContent = problems.join(' '); return; }
     if (typeof Encoding === 'undefined') { m.className = 'msg'; m.textContent = 'Shift-JISに変換する部品を読み込めませんでした。ページを開き直してください。'; return; }
     // Shift-JIS（CP932）にない文字を、見た目の近い文字に置き換える
     const sjisSafe = text.replace(/\u301C/g, '\uFF5E').replace(/\u2212/g, '\uFF0D').replace(/[\u2010\u2011]/g, '-').replace(/\u00A0/g, ' ');
     const bytes = new Uint8Array(Encoding.convert(Encoding.stringToCode(sjisSafe), { to: 'SJIS', from: 'UNICODE' }));
-    const name = `${(state.settings.name || current.name).replace(/[\s　]/g, '')}_${Y}年${M}月_${state.settings.format === 'mjs' ? 'MJS' : 'JDL'}_${BOOKS[book]}.csv`;
+    const name = `${(state.settings.name || current.name).replace(/[\s　]/g, '')}_${Y}年${M}月_${state.settings.format === 'mjs' ? 'MJS' : 'JDL'}_${csvLabel()}.csv`;
     const url = URL.createObjectURL(new Blob([bytes], { type: 'text/csv' }));
     const a = document.createElement('a'); a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 60000);
@@ -1572,7 +1638,7 @@ html, body { margin: 0; }
     }
     try { localStorage.setItem('office-client', id || ''); } catch (e) {}
     lastLoaded = Date.now();
-    cfgDraft = null;
+    cfgDraft = null; mwRestart();
     render(); renderCfg();
   }
 
@@ -1671,8 +1737,10 @@ html, body { margin: 0; }
   });
 
   $('clientSel').addEventListener('change', e => openClient(e.target.value).catch(err => showReload(err.message)));
-  $('prevMonth').addEventListener('click', () => { setMonth(shiftYM(THIS, -1)); render(); });
-  $('nextMonth').addEventListener('click', () => { setMonth(shiftYM(THIS, 1)); render(); });
+  // 月次の作業中に月や顧問先を変えたら、最初の帳簿からやり直す（book を空にすると最初の帳簿になる）
+  const mwRestart = () => { mwCsv = false; if (mwOn()) book = ''; };
+  $('prevMonth').addEventListener('click', () => { setMonth(shiftYM(THIS, -1)); mwRestart(); render(); });
+  $('nextMonth').addEventListener('click', () => { setMonth(shiftYM(THIS, 1)); mwRestart(); render(); });
   $('reloadBtn').addEventListener('click', () => location.reload());
 
   $('reqList').addEventListener('click', async e => {
@@ -1718,7 +1786,7 @@ html, body { margin: 0; }
     }
   });
 
-  /* ---------- 月次入力の作成（ウィザード）：顧問先ごとに、帳簿・給与・メールアドレスを順に決めて作る ---------- */
+  /* ---------- 顧問先の設定（初回）のウィザード：顧問先ごとに、帳簿・給与・メールアドレスを順に決めて作る ---------- */
 
   const WZ_STEPS = ['顧問先', '入力の順番', '帳簿ごとの詳細', '給与', 'メールアドレス', '確認して作成'];
   const clone = v => JSON.parse(JSON.stringify(v));
@@ -1809,10 +1877,10 @@ html, body { margin: 0; }
     const host = location.hostname.split('.').slice(1).join('.');
     if (wz.done) {
       const c = clients.find(x => x.id === wz.done);
-      B.innerHTML = `<p class="msg ok" style="font-size:15px">${esc(c?.name || '')} の月次入力を${wz.mode === 'new' ? '作成' : '保存'}しました。</p>
+      B.innerHTML = `<p class="msg ok" style="font-size:15px">${esc(c?.name || '')} の設定を${wz.mode === 'new' ? '作成' : '保存'}しました。</p>
         ${c ? `<p>顧問先のページ：<a href="https://${esc(c.subdomain)}.${esc(host)}/" target="_blank" rel="noopener"><code>https://${esc(c.subdomain)}.${esc(host)}</code></a></p>` : ''}
         <p class="hint">登録したメールアドレスの人が、このアドレスを開いて入力します。自由項目の項目と仕訳、記入の細かい設定は「顧問先ページの設定」で直せます。</p>
-        <div style="display:flex;flex-wrap:wrap;gap:10px"><a class="btn ghost" href="#settings">顧問先ページの設定を開く</a><a class="btn ghost" href="#journal">仕訳変換を開く</a></div>`;
+        <div style="display:flex;flex-wrap:wrap;gap:10px"><a class="btn ghost" href="#settings">顧問先ページの設定を開く</a><a class="btn ghost" href="#monthly">月次の作業を始める</a></div>`;
       return;
     }
     if (wz.step === 0) {
@@ -2060,12 +2128,17 @@ html, body { margin: 0; }
 
   /* ---------- サイドバー（URL の # で画面を切り替える） ---------- */
 
-  const VIEWS = ['overview', 'journal', 'requests', 'settings', 'accounts', 'wizard', 'clients'];
+  const VIEWS = ['overview', 'monthly', 'journal', 'requests', 'settings', 'accounts', 'wizard', 'clients'];
   // 顧問先を選ぶ欄は、選んでいる顧問先の画面と、メールアドレスの画面で出す
-  const NEED_CLIENT = ['journal', 'requests', 'settings', 'accounts', 'clients'];
+  const NEED_CLIENT = ['monthly', 'journal', 'requests', 'settings', 'accounts', 'clients'];
+  let lastView = '';
   function showView() {
     const v = VIEWS.includes(location.hash.slice(1)) ? location.hash.slice(1) : 'overview';
-    document.querySelectorAll('.view').forEach(el => el.classList.toggle('on', el.dataset.view === v));
+    document.querySelectorAll('.view').forEach(el => el.classList.toggle('on', el.dataset.view === v || (v === 'monthly' && el.dataset.view === 'journal')));
+    // 月次の作業は、仕訳変換の画面を順番に案内する形で使う。開いたら最初の帳簿から
+    if (v === 'monthly' && lastView !== 'monthly') { mwCsv = false; book = Object.keys(BOOKS)[0] || book; }
+    lastView = v;
+    if (current) render();
     document.querySelectorAll('#side [data-nav]').forEach(a => { if (a.dataset.nav === v) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current'); });
     $('topBar').hidden = !NEED_CLIENT.includes(v);
     if (v === 'wizard') renderWizard();
