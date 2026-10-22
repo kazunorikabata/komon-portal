@@ -146,6 +146,7 @@ html, body { margin: 0; }
 #overview .newcount { color: var(--bad); font-weight: 700; }
 .link-btn { background: none; border: 0; padding: 2px 4px; cursor: pointer; font: inherit; font-size: 13px; color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
 .link-btn.danger { color: var(--bad); }
+.link-btn:disabled { opacity: .35; cursor: default; text-decoration: none; }
 .cfg-book { border: 1px solid var(--rule); border-radius: 4px; padding: 12px 14px; display: grid; gap: 10px; margin: 0; min-width: 0; }
 .cfg-book legend { font-weight: 500; padding: 0 6px; }
 .checks { display: flex; flex-wrap: wrap; gap: 6px 16px; align-items: center; font-size: 13px; }
@@ -1689,11 +1690,11 @@ html, body { margin: 0; }
 
   /* ---------- 月次入力の作成（ウィザード）：顧問先ごとに、帳簿・給与・メールアドレスを順に決めて作る ---------- */
 
-  const WZ_STEPS = ['顧問先', '使う帳簿', '帳簿ごとの詳細', '給与', 'メールアドレス', '確認して作成'];
+  const WZ_STEPS = ['顧問先', '入力の順番', '帳簿ごとの詳細', '給与', 'メールアドレス', '確認して作成'];
   const clone = v => JSON.parse(JSON.stringify(v));
   let wz = null;
   function wzReset() {
-    wz = { step: 0, mode: 'new', cid: '', name: '', sub: '', books: [clone(DEFAULT_BOOK)], fyStart: 4, payOn: false,
+    wz = { step: 0, mode: 'new', cid: '', name: '', sub: '', books: [], fyStart: 4, payOn: false,
       payroll: { name: '給与', acctPay: '318', tax: { ...Payroll.DEFAULT_TAX } }, pay: { rates: { ...Payroll.DEFAULT_RATES }, closeDay: 0, payLag: 0, payDay: 25, lag: 1 },
       emails: [], accts: DEFAULT_ACCTS.map(a => ({ ...a })), used: new Set(), done: null };
   }
@@ -1714,7 +1715,44 @@ html, body { margin: 0; }
   }
   const wzBooks = () => accessBooks({ cashbooks: wz.books, payroll: { enabled: wz.payOn, name: wz.payroll.name } });
   const wzAcct = sel => `<option value="">科目を選ぶ</option>` + wz.accts.map(a => `<option value="${a.code}"${a.code === sel ? ' selected' : ''}>${a.code} ${esc(a.name)}</option>`).join('');
-  const bookType = b => b.type === 'bank' ? '通帳' : b.type === 'custom' ? (b.mode === 'form' ? '自由項目（月1回の用紙）' : '自由項目（表）') : b.kinds?.includes('exp') ? '現金（経費精算）' : '現金出納帳';
+  // 入力の種類。顧問先はこの中から使うものを、入力する順番に並べる（顧問先のページのタブも同じ順番）
+  const CATS = {
+    bank: ['通帳', '預金の入出金。手入力・CSVの読み込み・月末に通帳の残高と照合'],
+    cash: ['現金', '現金出納帳。シンプル・詳しく・経費精算から選ぶ'],
+    ar: ['売掛金', '売上の請求を1件ずつ（日付・得意先・金額）→ 売掛金／売上'],
+    ap: ['買掛金', '仕入の請求を1件ずつ（日付・仕入先・金額）→ 仕入／買掛金'],
+    card: ['クレジット', 'カードの利用を1件ずつ（日付・利用先・金額）→ 経費／未払金'],
+    other: ['その他', '項目を自由に決める（表または月1回の用紙）'],
+  };
+  const catOf = b => b.cat || (b.type === 'bank' ? 'bank' : b.type === 'custom' ? 'other' : 'cash');
+  const CASH_STYLES = { simple: 'シンプル', detail: '詳しく', exp: '経費精算' };
+  const cashStyle = b => b.kinds?.includes('exp') ? 'exp' : b.cols?.acct || b.cols?.dept || b.cols?.invNo ? 'detail' : 'simple';
+  const bookType = b => { const c = catOf(b); return c === 'cash' ? `現金（${CASH_STYLES[cashStyle(b)]}）` : c === 'other' ? `その他（${b.mode === 'form' ? '月1回の用紙' : '表'}）` : CATS[c][0]; };
+  // 種類ごとのひな形。売掛金・買掛金・クレジットは自由項目（表）で、金額から仕訳を出す
+  function catBook(cat) {
+    const acctBy = re => wz.accts.find(a => re.test(a.name))?.code || '';
+    const tbl = (name, who, dr, cr, tax) => ({ name, type: 'custom', mode: 'table', cat,
+      fields: [{ key: 'f1', label: '日付', kind: 'date', required: true }, { key: 'f2', label: who, kind: 'text', required: true }, { key: 'f3', label: '内容', kind: 'text' }, { key: 'f4', label: '金額', kind: 'number', required: true }],
+      journal: [{ field: 'f4', dr, cr, tax, tekiyo: `{${who}} {内容}` }], kinds: [], cols: {}, count: false, expPrint: false });
+    if (cat === 'bank') return clone(PRESETS.bank[1]);
+    if (cat === 'cash') return clone(PRESETS.simple[1]);
+    if (cat === 'ar') return tbl('売掛金', '得意先', URIKAKE, acctBy(/^売上/), 's10');
+    if (cat === 'ap') return tbl('買掛金', '仕入先', acctBy(/^仕入/), KAIKAKE, 'p10');
+    if (cat === 'card') return tbl('クレジットカード', '利用先', '', acctBy(/未払金/), 'p10');
+    return { ...clone(PRESETS.custom_table[1]), name: 'その他の入力', cat: 'other' };
+  }
+  function wzAddBook(cat) {
+    let n = wz.books.length + 1, bid = wz.books.some(b => b.id === 'main') ? '' : 'main';
+    while (!bid || wz.books.some(b => b.id === bid)) bid = 'b' + n++;
+    const p = catBook(cat), b = { ...p, id: bid, acct: p.acct || CASH, opening: 0, depts: [] };
+    // 同じ種類の後ろか、決まった順番（通帳→現金→売掛金→買掛金→クレジット→その他）の位置に入れる
+    const order = Object.keys(CATS), k = order.indexOf(cat);
+    const cats = wz.books.map(catOf), last = cats.lastIndexOf(cat), later = cats.findIndex(c => order.indexOf(c) > k);
+    const at = last >= 0 ? last + 1 : later >= 0 ? later : wz.books.length;
+    // 同じ名前にならないように番号を付ける（あとで「帳簿ごとの詳細」で直せる）
+    for (let k2 = 2; wz.books.some(x => x.name === b.name); k2++) b.name = `${p.name} ${k2}`;
+    wz.books.splice(at, 0, b);
+  }
 
   function renderWizard() {
     if (!wz) wzReset();
@@ -1746,24 +1784,36 @@ html, body { margin: 0; }
         : `<label class="f" for="wz-cid" style="max-width:420px">顧問先（標準の画面）<select id="wz-cid" data-w="cid"><option value="">選ぶ</option>${std.map(c => `<option value="${c.id}"${wz.cid === c.id ? ' selected' : ''}>${esc(c.name)}</option>`).join('')}</select></label>
           <p class="hint">今の設定を読み込んで、順に直せます。記入がある帳簿は外せません。</p>`}`;
     } else if (wz.step === 1) {
-      B.innerHTML = `<p class="hint">顧問先が使う帳簿を選びます。同じ種類をいくつでも足せます（例：現金出納帳を店ごとに2つ）。帳簿ごとに別々に提出します。</p>
-        <div class="table-box"><table class="accts"><thead><tr><th>帳簿</th><th>種類</th><th></th></tr></thead><tbody>
-          ${wz.books.map((b, i) => `<tr><td>${esc(b.name)}</td><td>${bookType(b)}</td><td>${wz.used.has(b.id) ? '<span class="hint">記入があるので外せません</span>' : `<button type="button" class="link-btn danger" data-wzrm="${i}">外す</button>`}</td></tr>`).join('') || '<tr><td colspan="3" class="hint">まだありません。下から選んでください。</td></tr>'}
+      const n = wz.books.length;
+      B.innerHTML = `<p class="hint">顧問先が使う入力を選んで、入力する順番に並べます。顧問先のページのタブもこの順番になります。同じ種類が2つ以上あるとき（通帳が2冊など）は「もう1つ」を押してください。入力ごとに別々に提出します。</p>
+        <div class="wz-pick">${Object.entries(CATS).map(([k, [t, d]]) => `<label class="check" style="align-items:start;background:var(--paper);border:1px solid var(--rule);border-radius:4px;padding:10px 12px"><input type="checkbox" data-wzcat="${k}"${wz.books.some(b => catOf(b) === k) ? ' checked' : ''} style="margin-top:4px"><span style="display:grid;gap:2px"><b style="font-weight:500">${t}</b><span class="hint">${d}</span></span></label>`).join('')}</div>
+        <h3 style="margin:0;font-size:14px">入力する順番</h3>
+        <div class="table-box"><table class="accts"><thead><tr><th>順番</th><th>名前</th><th>種類</th><th>並べ替え</th><th></th></tr></thead><tbody>
+          ${wz.books.map((b, i) => `<tr><td>${i + 1}</td><td>${esc(b.name)}</td><td>${bookType(b)}</td>
+            <td style="white-space:nowrap"><button type="button" class="link-btn" data-wzmv="${i}:-1"${i ? '' : ' disabled'} aria-label="${esc(b.name)}を上へ">↑ 上へ</button><button type="button" class="link-btn" data-wzmv="${i}:1"${i < n - 1 ? '' : ' disabled'} aria-label="${esc(b.name)}を下へ">↓ 下へ</button></td>
+            <td style="white-space:nowrap"><button type="button" class="link-btn" data-wzmore="${catOf(b)}">もう1つ</button>${wz.used.has(b.id) ? '<span class="hint">記入があるので外せません</span>' : `<button type="button" class="link-btn danger" data-wzrm="${i}">外す</button>`}</td></tr>`).join('') || '<tr><td colspan="5" class="hint">まだありません。上で使う入力にチェックしてください。</td></tr>'}
         </tbody></table></div>
-        <h3 style="margin:0;font-size:14px">帳簿を足す</h3>
-        <div class="wz-pick">${Object.entries(PRESETS).map(([k, [label, p]]) => { const [, t, d] = label.match(/^(.*?)（([^（]*)）$/) || [, label, '']; return `<button type="button" data-wzadd="${k}"><b>＋ ${p.type ? '' : '現金出納帳：'}${esc(t)}</b><span>${esc(d)}</span></button>`; }).join('')}</div>
-        <div class="checks" style="border-top:1px solid var(--rule);padding-top:12px">${chk('data-w="payOn"', wz.payOn, '給与計算も使う（一人ずつ入力して、明細・賃金台帳・仕訳を出す）')}</div>`;
+        <div class="checks" style="border-top:1px solid var(--rule);padding-top:12px">${chk('data-w="payOn"', wz.payOn, '給与計算も使う（一人ずつ入力して、明細・賃金台帳・仕訳を出す。タブはいちばん後ろ）')}</div>`;
     } else if (wz.step === 2) {
       B.innerHTML = `<label class="f" for="wz-fy" style="max-width:260px">事業年度の始まりの月（年間一覧）<select id="wz-fy" data-w="fyStart">${Array.from({ length: 12 }, (_, k) => `<option value="${k + 1}"${Number(wz.fyStart) === k + 1 ? ' selected' : ''}>${k + 1}月</option>`).join('')}</select></label>
         ${wz.books.map((b, i) => {
           const f = (key, label, v, extra = '') => `<label class="f" for="wz-${i}-${key}">${label}<input type="text" id="wz-${i}-${key}" data-wb="${i}:${key}" value="${esc(v ?? '')}" ${extra}></label>`;
           const head = `<legend>${esc(bookType(b))}</legend><div class="fields">${f('name', '名前', b.name)}`;
+          if (b.type === 'custom' && b.cat && b.cat !== 'other') {
+            const j = b.journal[0], opt = sel => `<option value="">（取引ごとに選ぶ）</option>` + wz.accts.map(a => `<option value="${a.code}"${a.code === sel ? ' selected' : ''}>${a.code} ${esc(a.name)}</option>`).join('');
+            return `<fieldset class="cfg-book">${head}
+              <label class="f" for="wz-${i}-jdr">借方<select id="wz-${i}-jdr" data-wbj="${i}:dr">${opt(j.dr)}</select></label>
+              <label class="f" for="wz-${i}-jcr">貸方<select id="wz-${i}-jcr" data-wbj="${i}:cr">${opt(j.cr)}</select></label>
+              <label class="f" for="wz-${i}-jtax">税区分<select id="wz-${i}-jtax" data-wbj="${i}:tax">${Object.entries(TAXES).map(([k, t]) => `<option value="${k}"${k === j.tax ? ' selected' : ''}>${t.label}</option>`).join('')}</select></label></div>
+              <p class="hint">顧問先は ${(b.fields || []).map(x => esc(x.label)).join('・')} を1件ずつ入力します（CSVの読み込みも可）。「取引ごとに選ぶ」にした科目は、仕訳の画面で事務所が選びます${b.cat === 'card' ? '（経費の科目はふつうこちら）' : ''}。${b.cat === 'card' ? (j.cr ? '' : '<b>貸方に未払金（カードの支払）の科目を選んでください。科目一覧にないときは、作成したあと「科目一覧」で足して、「顧問先ページの設定」で選んでください。</b>') : !j.dr || !j.cr ? '<b>科目を選んでください。</b>' : ''}項目は、作成したあと「顧問先ページの設定」で足せます。</p></fieldset>`;
+          }
           if (b.type === 'custom') return `<fieldset class="cfg-book">${head}
             <label class="f" for="wz-${i}-mode">形<select id="wz-${i}-mode" data-wb="${i}:mode"><option value="table"${b.mode !== 'form' ? ' selected' : ''}>表（1行ずつ足す）</option><option value="form"${b.mode === 'form' ? ' selected' : ''}>月1回の用紙</option></select></label></div>
             <p class="hint">項目：${(b.fields || []).map(x => esc(x.label)).join('・')}。項目と仕訳の科目は、作成したあと「顧問先ページの設定」で決めます。</p></fieldset>`;
+          const styleSel = b.type === 'bank' ? '' : `<label class="f" for="wz-${i}-style">入力のしかた<select id="wz-${i}-style" data-wbstyle="${i}">${Object.entries({ simple: PRESETS.simple[0], detail: PRESETS.detail[0], exp: PRESETS.exp[0] }).map(([k, l]) => `<option value="${k}"${cashStyle(b) === k ? ' selected' : ''}>${esc(l)}</option>`).join('')}</select></label>`;
           const bank = b.type === 'bank';
           return `<fieldset class="cfg-book">${head}
-            <label class="f" for="wz-${i}-acct">会計ソフトの科目（この${bank ? '預金' : '現金'}）<select id="wz-${i}-acct" data-wb="${i}:acct">${wzAcct(b.acct || (bank ? BANK : CASH))}</select></label>
+            ${styleSel}<label class="f" for="wz-${i}-acct">会計ソフトの科目（この${bank ? '預金' : '現金'}）<select id="wz-${i}-acct" data-wb="${i}:acct">${wzAcct(b.acct || (bank ? BANK : CASH))}</select></label>
             ${f('opening', '使い始める前の残高（円）', Number(b.opening) || 0, 'inputmode="numeric"')}
             ${f('sub', '補助コード（任意）', b.sub, 'inputmode="numeric"')}${f('subName', '補助の名前（任意）', b.subName)}
             ${bank ? f('bankCode', '銀行コード（MJS・任意）', b.bankCode, 'inputmode="numeric"') + f('bankName', '銀行の名前（MJS・任意）', b.bankName) : ''}
@@ -1817,7 +1867,7 @@ html, body { margin: 0; }
         <div class="table-box"><table class="wz-sum"><tbody>
           ${row('顧問先', `${esc(wz.name)}${wz.mode === 'new' ? `（新規・サブドメイン ${esc(wz.sub || '自動')}）` : ''}`)}
           ${row('事業年度の始まり', `${wz.fyStart}月`)}
-          ${wz.books.map((b, i) => row(`帳簿 ${i + 1}`, `<b>${esc(b.name)}</b>（${bookType(b)}）${b.type === 'custom' ? `<div class="hint">項目：${(b.fields || []).map(x => esc(x.label)).join('・')}</div>` : `<div class="hint">科目 ${esc(acctName(b.acct))}${b.sub ? `・補助 ${esc(b.sub)}` : ''}${b.bankCode ? `・銀行 ${esc(b.bankCode)}` : ''}・始める前の残高 ${yen(Number(b.opening) || 0)}円${b.type === 'bank' ? '' : `・${b.kinds.map(k => KIND_NAMES[k]).join('・')}`}</div>`}`)).join('')}
+          ${wz.books.map((b, i) => row(`${i + 1}番目`, `<b>${esc(b.name)}</b>　<span class="hint">${bookType(b)}</span>${b.type === 'custom' ? `<div class="hint">項目：${(b.fields || []).map(x => esc(x.label)).join('・')}${b.cat && b.cat !== 'other' ? `・仕訳：${esc(b.journal[0].dr ? acctName(b.journal[0].dr) : '取引ごとに選ぶ')} ／ ${esc(b.journal[0].cr ? acctName(b.journal[0].cr) : '取引ごとに選ぶ')}（${TAXES[b.journal[0].tax]?.label || ''}）` : ''}</div>` : `<div class="hint">科目 ${esc(acctName(b.acct))}${b.sub ? `・補助 ${esc(b.sub)}` : ''}${b.bankCode ? `・銀行 ${esc(b.bankCode)}` : ''}・始める前の残高 ${yen(Number(b.opening) || 0)}円${b.type === 'bank' ? '' : `・${b.kinds.map(k => KIND_NAMES[k]).join('・')}`}</div>`}`)).join('')}
           ${row('給与計算', wz.payOn ? `使う（${esc(wz.payroll.name)}）<div class="hint">${esc(Payroll.ruleText(wz.pay))}・未払 ${esc(acctName(wz.payroll.acctPay))}</div>` : '使わない')}
           ${row('メールアドレス', wz.emails.map(m => `<div>${esc(m.email)}${m.old ? '' : '（新しく登録）'}<span class="hint">：${!m.books || m.books.length === books.length ? 'すべての帳簿' : m.books.map(name).map(esc).join('・')}</span></div>`).join('') || '<span class="hint">なし（あとで「顧問先とメールアドレス」で足せます）</span>')}
         </tbody></table></div>`;
@@ -1832,6 +1882,13 @@ html, body { margin: 0; }
       else if (k === 'fyStart') wz.fyStart = Number(t.value);
       else wz[k] = t.value;
       return;
+    }
+    if (t.dataset.wbj) { const [i, key] = t.dataset.wbj.split(':'); wz.books[Number(i)].journal[0][key] = t.value; return; }
+    if (t.dataset.wbstyle) {
+      // 現金の入力のしかたを変えたら、記入の種類・項目などをそのひな形にそろえる
+      const b = wz.books[Number(t.dataset.wbstyle)], { kinds, cols, inTypes, count, expPrint } = clone(PRESETS[t.value][1]);
+      Object.assign(b, { kinds, cols, inTypes, count, expPrint });
+      renderWizard(); return;
     }
     if (t.dataset.wb) {
       const [i, key, sub] = t.dataset.wb.split(':'), b = wz.books[Number(i)];
@@ -1858,15 +1915,25 @@ html, body { margin: 0; }
   });
   $('wzBody').addEventListener('change', e => {
     if (e.target.name === 'wz-mode') { wz.mode = e.target.value; wz.cid = ''; renderWizard(); }
+    const cat = e.target.dataset.wzcat;
+    if (cat) {
+      if (e.target.checked) wzAddBook(cat);
+      else {
+        const used = wz.books.filter(b => catOf(b) === cat && wz.used.has(b.id));
+        wz.books = wz.books.filter(b => catOf(b) !== cat || wz.used.has(b.id));
+        renderWizard();
+        if (used.length) { $('wzMsg').textContent = `${used.map(b => b.name).join('・')} には記入があるので外せません。`; }
+        return;
+      }
+      renderWizard();
+    }
   });
   $('wzBody').addEventListener('click', e => {
     const t = e.target.closest('button'); if (!t) return;
-    if (t.dataset.wzadd) {
-      const [, p] = PRESETS[t.dataset.wzadd];
-      let n = wz.books.length + 1, bid = wz.books.some(b => b.id === 'main') ? '' : 'main';
-      while (!bid || wz.books.some(b => b.id === bid)) bid = 'b' + n++;
-      wz.books.push({ ...clone(p), id: bid, acct: p.acct || CASH, opening: 0, depts: [] });
-      renderWizard(); return;
+    if (t.dataset.wzmore) { wzAddBook(t.dataset.wzmore); renderWizard(); return; }
+    if (t.dataset.wzmv) {
+      const [i, d] = t.dataset.wzmv.split(':').map(Number), [b] = wz.books.splice(i, 1);
+      wz.books.splice(i + d, 0, b); renderWizard(); return;
     }
     if (t.dataset.wzrm !== undefined) { wz.books.splice(Number(t.dataset.wzrm), 1); renderWizard(); return; }
     if (t.dataset.wzrmmail !== undefined) { wz.emails.splice(Number(t.dataset.wzrmmail), 1); renderWizard(); return; }
@@ -1891,7 +1958,7 @@ html, body { margin: 0; }
         try { await wzLoad(wz.cid); } catch (e) { return err(e.message); }
       }
     }
-    if (wz.step === 1 && !wz.books.length) return err('帳簿を1つ以上選んでください。');
+    if (wz.step === 1 && !wz.books.length) return err('使う入力を1つ以上選んでください。');
     if (wz.step === 2) {
       const bad = wz.books.find(b => !String(b.name).trim() || (b.type !== 'custom' && b.type !== 'bank' && !b.kinds.length));
       if (bad) return err('帳簿ごとに、名前と記入の種類を1つ以上決めてください。');
