@@ -1053,6 +1053,8 @@ html, body { margin: 0; }
   /* ---------- CSV ---------- */
 
   const q = s => `"${String(s ?? '').replace(/"/g, '”')}"`;
+  // MJS は引用符も文字として取り込む（摘要が "…" になる）ので、引用符で囲まない。区切りと混ざる文字は全角にする
+  const mq = s => String(s ?? '').replace(/"/g, '”').replace(/,/g, '，').replace(/[\r\n]+/g, ' ');
   const wareki = s => { const [y, m, dd] = s.split('-').map(Number); return `${y - 2018}${String(m).padStart(2, '0')}${String(dd).padStart(2, '0')}`; };
 
   // MJS：消費税コード 10 課税・30 非課税・40 不課税（損益の科目）・0 なし（資産・負債どうし）、税率 4 は10%・5 は軽減8%、事業者取引区分 1 はインボイスなし（80%控除）
@@ -1071,9 +1073,9 @@ html, body { margin: 0; }
     if (S.format === 'mjs') {
       const lines = ['"伝票日付","（借）科目ｺｰﾄﾞ","（借）科目名","（借）補助ｺｰﾄﾞ","（借）補助名","（借）銀行ｺｰﾄﾞ","（借）銀行名","（貸）科目ｺｰﾄﾞ","（貸）科目名","（貸）補助ｺｰﾄﾞ","（貸）補助名","（貸）銀行ｺｰﾄﾞ","（貸）銀行名","金額","消費税ｺｰﾄﾞ","消費税率","事業者取引区分","摘要","摘要コード1","摘要コード2","摘要コード3"'];
       for (const j of js) {
-        // 補助コード・銀行コードは数字のまま（引用符で囲むと、MJSが文字として読んで「銀行が自動修正されました」のエラーになる）
-        const side = (code, sub, bank) => [code, q(acct(code)?.name), sub?.code ?? '', q(sub?.name), bank?.code ?? '', q(bank?.name)];
-        lines.push([j.date.replace(/-/g, '/'), ...side(j.dr, j.drSub, j.drBank), ...side(j.cr, j.crSub, j.crBank), j.amt, ...mjsTax(j), q(j.tekiyo), 0, 0, 0].join(','));
+        // 補助コード・銀行コードは数字のまま、名前と摘要も引用符で囲まない（囲むと、MJSが引用符も文字として読む）
+        const side = (code, sub, bank) => [code, mq(acct(code)?.name), sub?.code ?? '', mq(sub?.name), bank?.code ?? '', mq(bank?.name)];
+        lines.push([j.date.replace(/-/g, '/'), ...side(j.dr, j.drSub, j.drBank), ...side(j.cr, j.crSub, j.crBank), j.amt, ...mjsTax(j), mq(j.tekiyo), 0, 0, 0].join(','));
       }
       return { text: lines.join('\r\n') + '\r\n', problems, count: js.length };
     }
