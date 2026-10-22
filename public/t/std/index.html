@@ -115,6 +115,10 @@ nav.tabs button {
   border-bottom: 3px solid transparent; white-space: nowrap;
 }
 nav.tabs button[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--accent); }
+nav.tabs.sub { border-bottom: 0; gap: 6px; margin-top: -8px; }
+nav.tabs.sub button { padding: 5px 14px; border: 1px solid var(--rule); border-radius: 999px; font-size: 14px; }
+nav.tabs.sub button[aria-selected="true"] { background: var(--accent); border-color: var(--accent); color: var(--sheet); }
+nav.tabs.sub button[aria-selected="true"] .count { color: inherit; }
 nav.tabs button .count { font-family: var(--font-num); font-size: 12px; margin-left: 4px; color: var(--ink-soft); }
 
 .ledger-head { display: flex; flex-wrap: wrap; gap: 8px 20px; justify-content: space-between; align-items: baseline; }
@@ -266,7 +270,8 @@ td.partner { min-width: 7em; }
     <span class="pill" id="monthState"></span>
   </section>
 
-  <nav class="tabs" role="tablist" id="tabs"></nav>
+  <nav class="tabs" role="tablist" id="tabs" aria-label="分類"></nav>
+  <nav class="tabs sub" role="tablist" id="subTabs" aria-label="口座・帳簿" hidden></nav>
 
   <section id="yearView" hidden></section>
 
@@ -503,14 +508,32 @@ td.partner { min-width: 7em; }
     renderLists(); renderCashPanel(); renderTable(); renderSubmit();
   }
 
+  // タブは分類（通帳・現金・売掛金・買掛金・クレジット・その他・給与）ごとにまとめ、その中に口座・帳簿を順に並べる
+  const CAT_NAMES = { bank: '通帳', cash: '現金', ar: '売掛金', ap: '買掛金', card: 'クレジット', other: 'その他' };
+  const catOfBook = b => b.isPay ? 'pay' : b.cat || (b.type === 'bank' ? 'bank' : b.type === 'custom' ? 'other' : 'cash');
+  function bookGroups() {
+    const groups = [];
+    for (const b of allBooks()) {
+      const c = catOfBook(b);
+      let g = groups.find(x => x.cat === c);
+      if (!g) groups.push(g = { cat: c, name: c === 'pay' ? b.name : CAT_NAMES[c], books: [] });
+      g.books.push(b);
+    }
+    const order = CONFIG.cats || [], at = c => c === 'pay' ? 99 : order.includes(c) ? order.indexOf(c) : 50;
+    return groups.sort((x, y) => at(x.cat) - at(y.cat));
+  }
+  const bookCount = b => b.isPay ? Object.keys(state.pay[view.month]?.rows || {}).length : rowsOf(b.id, view.month).length;
   function renderTabs() {
-    const tabs = $('tabs');
+    const tabs = $('tabs'), groups = bookGroups(), cur = BK(), g = groups.find(x => x.books.some(b => b.id === cur.id)) || groups[0];
     tabs.hidden = allBooks().length < 2;
-    tabs.innerHTML = allBooks().map(b => {
-      const n = b.isPay ? Object.keys(state.pay[view.month]?.rows || {}).length : rowsOf(b.id, view.month).length;
-      const mark = lockedBook(view.month, b.id) ? '提出済' : String(n);
-      return `<button type="button" role="tab" id="tab-${esc(b.id)}" aria-selected="${b.id === BK().id}" data-book="${esc(b.id)}">${esc(b.name)}<span class="count">${mark}</span></button>`;
+    tabs.innerHTML = groups.map(x => {
+      const done = x.books.every(b => lockedBook(view.month, b.id));
+      const mark = done ? '提出済' : String(x.books.reduce((s, b) => s + bookCount(b), 0));
+      return `<button type="button" role="tab" id="tabg-${esc(x.cat)}" aria-selected="${x === g}" data-group="${esc(x.cat)}">${esc(x.name)}<span class="count">${mark}</span></button>`;
     }).join('');
+    const sub = $('subTabs');
+    sub.hidden = !g || g.books.length < 2;
+    sub.innerHTML = sub.hidden ? '' : g.books.map(b => `<button type="button" role="tab" id="tab-${esc(b.id)}" aria-selected="${b.id === cur.id}" data-book="${esc(b.id)}">${esc(b.name)}<span class="count">${lockedBook(view.month, b.id) ? '提出済' : bookCount(b)}</span></button>`).join('');
   }
 
   function renderStatus() {
@@ -1944,11 +1967,18 @@ th, td { border: 1px solid #000; padding: 1mm 1.5mm; } th { background: #eee; fo
   $('prevMonth').addEventListener('click', () => { view.month = shiftMonth(view.month, -1); resetView(); render(); });
   $('nextMonth').addEventListener('click', () => { view.month = shiftMonth(view.month, 1); resetView(); render(); });
   $('yearBtn').addEventListener('click', () => { view.mode = view.mode === 'year' ? 'month' : 'year'; resetView(); render(); });
-  $('tabs').addEventListener('click', e => {
-    const t = e.target.closest('[data-book]'); if (!t) return;
-    view.book = t.dataset.book; resetView(); render();
+  // 分類を押したら、その分類で前に開いていた口座・帳簿（なければ最初）を開く
+  const lastInGroup = {};
+  const openBook = id => {
+    view.book = id; lastInGroup[catOfBook(BK())] = id; resetView(); render();
     try { localStorage.setItem(KEY + ':book', view.book); } catch (err) {}
+  };
+  $('tabs').addEventListener('click', e => {
+    const t = e.target.closest('[data-group]'); if (!t) return;
+    const g = bookGroups().find(x => x.cat === t.dataset.group); if (!g) return;
+    openBook(g.books.some(b => b.id === lastInGroup[g.cat]) ? lastInGroup[g.cat] : g.books[0].id);
   });
+  $('subTabs').addEventListener('click', e => { const t = e.target.closest('[data-book]'); if (t) openBook(t.dataset.book); });
   $('reloadBtn').addEventListener('click', () => location.reload());
 
   boot();

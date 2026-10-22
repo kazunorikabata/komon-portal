@@ -246,14 +246,18 @@ async function officeApi(request, env, url, email) {
     const keys = months.map(m => 'm:' + m);
     const rows = keys.length ? (await env.DB.prepare(`SELECT client_id, key, json_extract(data, '$.submitted') AS submitted, json_extract(data, '$.requests') AS requests, updated_at
       FROM docs WHERE key IN (${keys.map(() => '?').join(',')})`).bind(...keys).all()).results : [];
-    const cfgs = (await env.DB.prepare(`SELECT client_id, json_extract(data, '$.cashbooks') AS cashbooks, json_extract(data, '$.payroll') AS payroll FROM docs WHERE key = 'config'`).all()).results;
+    const cfgs = (await env.DB.prepare(`SELECT client_id, json_extract(data, '$.cashbooks') AS cashbooks, json_extract(data, '$.payroll') AS payroll, json_extract(data, '$.direct') AS direct, json_extract(data, '$.plan') AS plan, json_extract(data, '$.cats') AS cats FROM docs WHERE key = 'config'`).all()).results;
+    // 事務所が会計ソフトに直接入力したものの「完了」（事務所の記録 office の done）
+    const dones = (await env.DB.prepare(`SELECT client_id, json_extract(data, '$.done') AS done FROM docs WHERE key = 'office'`).all()).results;
     const parse = v => { try { return v ? JSON.parse(v) : null; } catch (e) { return null; } };
     return json({
       months: rows.map(r => ({ client: r.client_id, month: r.key.slice(2), submitted: parse(r.submitted), requests: (parse(r.requests) || []).map(q => ({ book: q.book, status: q.status })), updatedAt: r.updated_at })),
       configs: Object.fromEntries(cfgs.map(r => {
         const pr = parse(r.payroll);
-        return [r.client_id, { cashbooks: (parse(r.cashbooks) || []).map(b => ({ id: b.id, name: b.name })), payroll: pr?.enabled ? { name: pr.name || '給与' } : null }];
+        return [r.client_id, { cashbooks: (parse(r.cashbooks) || []).map(b => ({ id: b.id, name: b.name, cat: b.cat, type: b.type })), payroll: pr?.enabled ? { name: pr.name || '給与' } : null,
+          direct: (parse(r.direct) || []).map(x => ({ id: x.id, name: x.name, cat: x.cat })), plan: parse(r.plan) || [], cats: parse(r.cats) || [] }];
       })),
+      dones: Object.fromEntries(dones.map(r => [r.client_id, parse(r.done) || {}])),
     });
   }
 

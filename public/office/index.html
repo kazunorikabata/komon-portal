@@ -267,8 +267,11 @@ html, body { margin: 0; }
   <nav class="tabs" role="tablist" id="tabs"></nav>
 
   <div id="payAlerts" hidden></div>
+  <section class="panel" id="directBox" hidden></section>
+  <div id="journalArea" style="display:grid;gap:10px">
   <p class="hint">赤い行は科目が未設定です。科目を選ぶと、同じ内容の取引には次回から自動で同じ科目が入ります。税区分は顧問先が入力した税率から自動で入ります。必要なら直してください。</p>
   <div class="table-box"><table id="journal"></table></div>
+  </div>
 
   <div>
     <section class="panel">
@@ -380,7 +383,8 @@ html, body { margin: 0; }
     if (isStd()) {
       const cfg = docs.config?.data || {};
       CFG = { fyStart: 4, ...cfg, cashbooks: cfg.cashbooks?.length ? cfg.cashbooks : [DEFAULT_BOOK] };
-      BOOKS = Object.fromEntries(CFG.cashbooks.map(b => ['cb:' + b.id, b.name]));
+      // 分類と順番（月次入力の作成で決めたもの）。事務所が会計ソフトに直接入力するものは 'dx:ID'
+      BOOKS = Object.fromEntries(planItems(CFG).map(x => [(x.how === 'direct' ? 'dx:' : 'cb:') + x.id, (x.cat ? CATS[catOf(x)][0] + '：' : '') + x.name]));
       if (CFG.payroll?.enabled) BOOKS.pay = CFG.payroll.name || '給与';
       // 現金は、直前の現金残高確認で数えた額を起点にする（顧問先のページと同じ計算）
       const books = CFG.cashbooks.map(b => {
@@ -679,6 +683,7 @@ html, body { margin: 0; }
       for (const k of ks) out.push({ ...base, key: `${base.key}:${k}`, amt: o[k], tax: noInv && k === 't8' ? 'p8n' : noInv && k === 't10' ? 'p10n' : BUCKET_TAX[k], bucket: k, need: side,
         [side === 'dr' ? 'cr' : 'dr']: fixed, desc, tekiyo: ks.length > 1 ? `${desc}・${BUCKET_NAME[k]}` : desc, src, noInv: noInv && k !== 'ot' });
     };
+    if (which.startsWith('dx:')) return out;
     if (which === 'pay') payJournals(out);
     else if (which.startsWith('cb:')) stdJournals(which.slice(3), out);
     else if (which === 'cash') {
@@ -832,8 +837,30 @@ html, body { margin: 0; }
 
   // 提出は帳簿ごと。以前の「月まとめて」の提出（文字列）は3つとも提出済みとみなす
   const subMap = v => typeof v === 'string' ? { cash: v, sr: v, pl: v } : (v && typeof v === 'object' ? v : {});
+  // 事務所が会計ソフトに直接入力するもの：月ごとに「完了」を押して終わりにする（事務所の記録 office の done に残す）
+  function renderDirect() {
+    const dx = book.startsWith('dx:');
+    $('directBox').hidden = !dx; $('journalArea').hidden = dx;
+    if (!dx) return;
+    const it = (CFG.direct || []).find(x => x.id === book.slice(3)) || {}, at = state.done?.[THIS]?.[it.id];
+    $('directBox').innerHTML = `<h3>${esc(BOOKS[book])}（${Y}年${M}月分）</h3>
+      <p class="hint">これは顧問先のページでは入力せず、事務所が会計ソフトに直接入力するものです。${it.memo ? `メモ：${esc(it.memo)}` : ''}</p>
+      ${at ? `<p class="msg ok" style="font-size:15px">会計ソフトへの入力は完了しています（${esc(at)}）。</p><div><button type="button" class="btn ghost" id="dxUndo">完了を取り消す</button></div>`
+        : `<p>会計ソフトに入力し終わったら、「完了」を押してください。</p><div><button type="button" class="btn" id="dxDone">完了</button></div>`}`;
+  }
+  $('directBox').addEventListener('click', e => {
+    if (!['dxDone', 'dxUndo'].includes(e.target.id)) return;
+    const id = book.slice(3);
+    state.done ||= {};
+    if (e.target.id === 'dxDone') (state.done[THIS] ||= {})[id] = stamp();
+    else { delete state.done[THIS]?.[id]; if (state.done[THIS] && !Object.keys(state.done[THIS]).length) delete state.done[THIS]; }
+    save(); render();
+    if (overview) { ((overview.dones ||= {})[current.id] = state.done); renderOverview(); }
+  });
+
   function monthState() {
     const d = CLIENT.month, sub = subMap(d.submitted);
+    if (book.startsWith('dx:')) { const at = state.done?.[THIS]?.[book.slice(3)]; return at ? { cls: '', label: `${BOOKS[book]}：会計ソフトに入力済み（完了 ${at}）` } : { cls: 'none', label: `${BOOKS[book]}：会計ソフトに未入力` }; }
     if ((d.requests || []).some(r => r.status === 'pending' && (!r.book || r.book === book))) return { cls: 'req', label: `${BOOKS[book]}：修正依頼あり` };
     if (sub[book]) return { cls: '', label: `${BOOKS[book]}：顧問先から提出済み（${sub[book]}）` };
     return { cls: 'none', label: `${BOOKS[book]}：未提出` };
@@ -854,6 +881,7 @@ html, body { margin: 0; }
     $('monthLabel').textContent = `${Y}年${M}月分`;
     $('tabs').innerHTML = Object.entries(BOOKS).map(([b, name]) => `<button type="button" role="tab" id="tab-${esc(b)}" data-book="${esc(b)}" aria-selected="${b === book}">${esc(name)}</button>`).join('');
     $('withPayWrap').hidden = $('withPayHint').hidden = isStd();
+    renderDirect();
     renderBal();
     const js = journals(book);
     const all = Object.keys(BOOKS).flatMap(b => journals(b));
@@ -1556,7 +1584,7 @@ html, body { margin: 0; }
   function booksOf(c) {
     if (c.template === 'std') {
       const cfg = overview?.configs?.[c.id];
-      const list = (cfg?.cashbooks?.length ? cfg.cashbooks : [{ id: 'main', name: '現金出納帳' }]).map(b => ['cb:' + b.id, b.name]);
+      const list = planItems({ ...cfg, cashbooks: cfg?.cashbooks?.length ? cfg.cashbooks : [{ id: 'main', name: '現金出納帳' }] }).map(b => [(b.how === 'direct' ? 'dx:' : 'cb:') + b.id, b.how === 'direct' ? `${b.name}（会計ソフト）` : b.name]);
       if (cfg?.payroll) list.push(['pay', cfg.payroll.name]);
       return list;
     }
@@ -1567,6 +1595,8 @@ html, body { margin: 0; }
   const readSeen = () => { try { return JSON.parse(localStorage.getItem('office-seen') || 'null'); } catch (e) { return null; } };
   const writeSeen = v => { try { localStorage.setItem('office-seen', JSON.stringify(v)); } catch (e) {} };
   function statusOf(c, m, b) {
+    // 会計ソフトに直接入力するものは、事務所が「完了」を押したかどうか（新着にはしない）
+    if (b.startsWith('dx:')) return { done: overview.dones?.[c.id]?.[m]?.[b.slice(3)] || '' };
     const d = overview.months.find(x => x.client === c.id && x.month === m);
     const sub = subMap(d?.submitted)[b];
     const reqs = (d?.requests || []).filter(q => !q.book || q.book === b);
@@ -1585,8 +1615,8 @@ html, body { margin: 0; }
       const cells = months.map(m => `<td><div class="books">${booksOf(c).map(([b, name]) => {
         const st = statusOf(c, m, b), isNew = st.sub && seen[seenKey(c.id, m, b)] !== st.token;
         if (isNew) { newCount++; rowNew = true; }
-        const cls = st.pending ? 'req' : isNew ? 'new' : st.sub ? '' : 'none';
-        const label = st.pending ? `${name}：修正依頼` : st.sub ? `${name}：提出 ${st.sub}` : `${name}：未提出`;
+        const cls = st.pending ? 'req' : isNew ? 'new' : st.sub || st.done ? '' : 'none';
+        const label = st.pending ? `${name}：修正依頼` : st.sub ? `${name}：提出 ${st.sub}` : 'done' in st ? `${name}：${st.done ? '完了 ' + st.done.split(' ')[0] : '未完了'}` : `${name}：未提出`;
         return `<button type="button" class="pill ${cls}" data-ov="${c.id}" data-m="${m}" data-b="${esc(b)}" title="${esc(c.name)} ${Number(m.slice(5))}月分を開く">${esc(label)}</button>`;
       }).join('')}</div></td>`).join('');
       return `<tr class="${rowNew ? 'has-new' : ''}"><td>${esc(c.name)}</td>${cells}</tr>`;
@@ -1694,7 +1724,7 @@ html, body { margin: 0; }
   const clone = v => JSON.parse(JSON.stringify(v));
   let wz = null;
   function wzReset() {
-    wz = { step: 0, mode: 'new', cid: '', name: '', sub: '', books: [], fyStart: 4, payOn: false,
+    wz = { step: 0, mode: 'new', cid: '', name: '', sub: '', books: [], cats: Object.keys(CATS), fyStart: 4, payOn: false,
       payroll: { name: '給与', acctPay: '318', tax: { ...Payroll.DEFAULT_TAX } }, pay: { rates: { ...Payroll.DEFAULT_RATES }, closeDay: 0, payLag: 0, payDay: 25, lag: 1 },
       emails: [], accts: DEFAULT_ACCTS.map(a => ({ ...a })), used: new Set(), done: null };
   }
@@ -1703,7 +1733,8 @@ html, body { margin: 0; }
     const c = clients.find(x => x.id === cid), d = (await api(`/api/office/clients/${cid}/state`)).docs;
     const cfg = d.config?.data || {}, old = cfg.payroll || {};
     wz.cid = cid; wz.name = c.name;
-    wz.books = clone(cfg.cashbooks?.length ? cfg.cashbooks : [DEFAULT_BOOK]);
+    wz.books = planItems(cfg).map(clone);
+    wz.cats = catOrder(cfg);
     wz.fyStart = cfg.fyStart || 4;
     wz.payOn = !!old.enabled;
     wz.payroll = { name: old.name || '給与', acctPay: old.acctPay || '318', tax: { ...Payroll.DEFAULT_TAX, ...old.tax } };
@@ -1713,7 +1744,8 @@ html, body { margin: 0; }
     wz.accts = d.office ? withDefaults({ ...defaultOffice(c.name), ...d.office.data }).accts : DEFAULT_ACCTS.map(a => ({ ...a }));
     wz.used = new Set(Object.entries(d).filter(([k]) => k.startsWith('m:')).flatMap(([, x]) => Object.entries(x.data.cb || {}).filter(([, v]) => v?.rows?.length || v?.count).map(([b]) => b)));
   }
-  const wzBooks = () => accessBooks({ cashbooks: wz.books, payroll: { enabled: wz.payOn, name: wz.payroll.name } });
+  const wzPage = () => wz.cats.flatMap(c => wz.books.filter(b => catOf(b) === c && b.how !== 'direct'));
+  const wzBooks = () => accessBooks({ cashbooks: wzPage(), payroll: { enabled: wz.payOn, name: wz.payroll.name } });
   const wzAcct = sel => `<option value="">科目を選ぶ</option>` + wz.accts.map(a => `<option value="${a.code}"${a.code === sel ? ' selected' : ''}>${a.code} ${esc(a.name)}</option>`).join('');
   // 入力の種類。顧問先はこの中から使うものを、入力する順番に並べる（顧問先のページのタブも同じ順番）
   const CATS = {
@@ -1725,9 +1757,20 @@ html, body { margin: 0; }
     other: ['その他', '項目を自由に決める（表または月1回の用紙）'],
   };
   const catOf = b => b.cat || (b.type === 'bank' ? 'bank' : b.type === 'custom' ? 'other' : 'cash');
+  const DIRECT_NAMES = { bank: '普通預金', cash: '現金', ar: '売掛金', ap: '買掛金', card: 'クレジットカード', other: 'その他' };
+  // 分類の順番と、分類の中の順番（顧問先がページで入力する帳簿と、事務所が会計ソフトに直接入力するもの）
+  const catOrder = cfg => { const o = (cfg.cats || []).filter(c => CATS[c]); for (const c of Object.keys(CATS)) if (!o.includes(c)) o.push(c); return o; };
+  function planItems(cfg) {
+    const books = cfg.cashbooks?.length ? cfg.cashbooks : [DEFAULT_BOOK], direct = (cfg.direct || []).map(x => ({ ...x, how: 'direct' }));
+    const all = [...books, ...direct], byId = Object.fromEntries(all.map(x => [x.id, x]));
+    const out = (cfg.plan || []).map(x => byId[x.id]).filter(Boolean);
+    for (const x of all) if (!out.includes(x)) out.push(x);
+    const order = catOrder(cfg);
+    return order.flatMap(c => out.filter(x => catOf(x) === c));
+  }
   const CASH_STYLES = { simple: 'シンプル', detail: '詳しく', exp: '経費精算' };
   const cashStyle = b => b.kinds?.includes('exp') ? 'exp' : b.cols?.acct || b.cols?.dept || b.cols?.invNo ? 'detail' : 'simple';
-  const bookType = b => { const c = catOf(b); return c === 'cash' ? `現金（${CASH_STYLES[cashStyle(b)]}）` : c === 'other' ? `その他（${b.mode === 'form' ? '月1回の用紙' : '表'}）` : CATS[c][0]; };
+  const bookType = b => { const c = catOf(b); if (b.how === 'direct') return `${CATS[c][0]}（事務所が会計ソフトに直接入力）`; return c === 'cash' ? `現金（${CASH_STYLES[cashStyle(b)]}）` : c === 'other' ? `その他（${b.mode === 'form' ? '月1回の用紙' : '表'}）` : CATS[c][0]; };
   // 種類ごとのひな形。売掛金・買掛金・クレジットは自由項目（表）で、金額から仕訳を出す
   function catBook(cat) {
     const acctBy = re => wz.accts.find(a => re.test(a.name))?.code || '';
@@ -1741,17 +1784,19 @@ html, body { margin: 0; }
     if (cat === 'card') return tbl('クレジットカード', '利用先', '', acctBy(/未払金/), 'p10');
     return { ...clone(PRESETS.custom_table[1]), name: 'その他の入力', cat: 'other' };
   }
+  const wzNewId = () => { let n = wz.books.length + 1, id = wz.books.some(b => b.id === 'main') ? '' : 'main'; while (!id || wz.books.some(b => b.id === id)) id = 'b' + n++; return id; };
+  const pageBook = (cat, id, name) => { const p = catBook(cat); return { ...p, id, name: name || p.name, acct: p.acct || CASH, opening: 0, depts: [] }; };
   function wzAddBook(cat) {
-    let n = wz.books.length + 1, bid = wz.books.some(b => b.id === 'main') ? '' : 'main';
-    while (!bid || wz.books.some(b => b.id === bid)) bid = 'b' + n++;
-    const p = catBook(cat), b = { ...p, id: bid, acct: p.acct || CASH, opening: 0, depts: [] };
-    // 同じ種類の後ろか、決まった順番（通帳→現金→売掛金→買掛金→クレジット→その他）の位置に入れる
-    const order = Object.keys(CATS), k = order.indexOf(cat);
-    const cats = wz.books.map(catOf), last = cats.lastIndexOf(cat), later = cats.findIndex(c => order.indexOf(c) > k);
-    const at = last >= 0 ? last + 1 : later >= 0 ? later : wz.books.length;
-    // 同じ名前にならないように番号を付ける（あとで「帳簿ごとの詳細」で直せる）
-    for (let k2 = 2; wz.books.some(x => x.name === b.name); k2++) b.name = `${p.name} ${k2}`;
-    wz.books.splice(at, 0, b);
+    const b = pageBook(cat, wzNewId());
+    // 同じ名前にならないように番号を付ける（名前はすぐ横で直せる）
+    for (let k = 2; wz.books.some(x => x.name === b.name); k++) b.name = `${catBook(cat).name} ${k}`;
+    wz.books.push(b);
+  }
+  // 同じ分類の中で、前（-1）か後ろ（1）のものと入れ替える
+  function wzMove(i, d) {
+    const c = catOf(wz.books[i]), same = wz.books.map((b, k) => catOf(b) === c ? k : -1).filter(k => k >= 0);
+    const j = same[same.indexOf(i) + d]; if (j === undefined) return;
+    [wz.books[i], wz.books[j]] = [wz.books[j], wz.books[i]];
   }
 
   function renderWizard() {
@@ -1784,21 +1829,29 @@ html, body { margin: 0; }
         : `<label class="f" for="wz-cid" style="max-width:420px">顧問先（標準の画面）<select id="wz-cid" data-w="cid"><option value="">選ぶ</option>${std.map(c => `<option value="${c.id}"${wz.cid === c.id ? ' selected' : ''}>${esc(c.name)}</option>`).join('')}</select></label>
           <p class="hint">今の設定を読み込んで、順に直せます。記入がある帳簿は外せません。</p>`}`;
     } else if (wz.step === 1) {
-      const n = wz.books.length;
-      B.innerHTML = `<p class="hint">顧問先が使う入力を選んで、入力する順番に並べます。顧問先のページのタブもこの順番になります。同じ種類が2つ以上あるとき（通帳が2冊など）は「もう1つ」を押してください。入力ごとに別々に提出します。</p>
-        <div class="wz-pick">${Object.entries(CATS).map(([k, [t, d]]) => `<label class="check" style="align-items:start;background:var(--paper);border:1px solid var(--rule);border-radius:4px;padding:10px 12px"><input type="checkbox" data-wzcat="${k}"${wz.books.some(b => catOf(b) === k) ? ' checked' : ''} style="margin-top:4px"><span style="display:grid;gap:2px"><b style="font-weight:500">${t}</b><span class="hint">${d}</span></span></label>`).join('')}</div>
-        <h3 style="margin:0;font-size:14px">入力する順番</h3>
-        <div class="table-box"><table class="accts"><thead><tr><th>順番</th><th>名前</th><th>種類</th><th>並べ替え</th><th></th></tr></thead><tbody>
-          ${wz.books.map((b, i) => `<tr><td>${i + 1}</td><td>${esc(b.name)}</td><td>${bookType(b)}</td>
-            <td style="white-space:nowrap"><button type="button" class="link-btn" data-wzmv="${i}:-1"${i ? '' : ' disabled'} aria-label="${esc(b.name)}を上へ">↑ 上へ</button><button type="button" class="link-btn" data-wzmv="${i}:1"${i < n - 1 ? '' : ' disabled'} aria-label="${esc(b.name)}を下へ">↓ 下へ</button></td>
-            <td style="white-space:nowrap"><button type="button" class="link-btn" data-wzmore="${catOf(b)}">もう1つ</button>${wz.used.has(b.id) ? '<span class="hint">記入があるので外せません</span>' : `<button type="button" class="link-btn danger" data-wzrm="${i}">外す</button>`}</td></tr>`).join('') || '<tr><td colspan="5" class="hint">まだありません。上で使う入力にチェックしてください。</td></tr>'}
-        </tbody></table></div>
+      B.innerHTML = `<p class="hint">毎月の入力を、分類ごとに入れる順番に並べます。分類の中に、口座や帳簿を順番に足してください（例：通帳の中に「普通預金（A銀行）」「普通預金（B銀行）」）。それぞれ、顧問先がこのしくみのページで入力するか、事務所が会計ソフトに直接入力するかを選びます。会計ソフトに直接入力するものは、事務所の画面で毎月「完了」を押して終わりにします。使わない分類は空のままで大丈夫です。顧問先のページも、この分類と順番でタブが並びます。</p>
+        ${wz.cats.map((c, ci) => {
+          const items = wz.books.map((b, i) => [b, i]).filter(([b]) => catOf(b) === c);
+          return `<fieldset class="cfg-book"><legend>${ci + 1}. ${CATS[c][0]}</legend>
+            <div class="foot"><span class="hint">${CATS[c][1]}</span><span style="white-space:nowrap"><button type="button" class="link-btn" data-wzcmv="${ci}:-1"${ci ? '' : ' disabled'}>↑ 分類を上へ</button><button type="button" class="link-btn" data-wzcmv="${ci}:1"${ci < wz.cats.length - 1 ? '' : ' disabled'}>↓ 分類を下へ</button></span></div>
+            ${items.length ? `<div class="table-box"><table class="accts"><thead><tr><th>順番</th><th>名前</th><th>入力のしかた</th><th>並べ替え</th><th></th></tr></thead><tbody>
+              ${items.map(([b, i], k) => `<tr><td>${k + 1}</td>
+                <td><input type="text" id="wz-${i}-name1" data-wb="${i}:name" value="${esc(b.name)}" aria-label="名前"></td>
+                <td><select id="wz-${i}-how" data-wzhow="${i}" aria-label="${esc(b.name)}の入力のしかた"><option value="page"${b.how !== 'direct' ? ' selected' : ''}>顧問先がページで入力</option><option value="direct"${b.how === 'direct' ? ' selected' : ''}>事務所が会計ソフトに直接入力</option></select></td>
+                <td style="white-space:nowrap"><button type="button" class="link-btn" data-wzmv="${i}:-1"${k ? '' : ' disabled'} aria-label="${esc(b.name)}を上へ">↑ 上へ</button><button type="button" class="link-btn" data-wzmv="${i}:1"${k < items.length - 1 ? '' : ' disabled'} aria-label="${esc(b.name)}を下へ">↓ 下へ</button></td>
+                <td>${wz.used.has(b.id) ? '<span class="hint">記入があるので外せません</span>' : `<button type="button" class="link-btn danger" data-wzrm="${i}">外す</button>`}</td></tr>`).join('')}
+            </tbody></table></div>` : '<p class="hint">使わない（空のまま）</p>'}
+            <div><button type="button" class="btn ghost" data-wzmore="${c}">＋ ${CATS[c][0]}を足す</button></div>
+          </fieldset>`;
+        }).join('')}
         <div class="checks" style="border-top:1px solid var(--rule);padding-top:12px">${chk('data-w="payOn"', wz.payOn, '給与計算も使う（一人ずつ入力して、明細・賃金台帳・仕訳を出す。タブはいちばん後ろ）')}</div>`;
     } else if (wz.step === 2) {
       B.innerHTML = `<label class="f" for="wz-fy" style="max-width:260px">事業年度の始まりの月（年間一覧）<select id="wz-fy" data-w="fyStart">${Array.from({ length: 12 }, (_, k) => `<option value="${k + 1}"${Number(wz.fyStart) === k + 1 ? ' selected' : ''}>${k + 1}月</option>`).join('')}</select></label>
-        ${wz.books.map((b, i) => {
+        ${wz.cats.flatMap(c => wz.books.map((b, i) => [b, i]).filter(([b]) => catOf(b) === c)).map(([b, i]) => {
           const f = (key, label, v, extra = '') => `<label class="f" for="wz-${i}-${key}">${label}<input type="text" id="wz-${i}-${key}" data-wb="${i}:${key}" value="${esc(v ?? '')}" ${extra}></label>`;
           const head = `<legend>${esc(bookType(b))}</legend><div class="fields">${f('name', '名前', b.name)}`;
+          if (b.how === 'direct') return `<fieldset class="cfg-book">${head}${f('memo', '事務所のメモ（任意）', b.memo, 'placeholder="例：ネットバンキングのCSVを会計ソフトに取り込む"')}</div>
+            <p class="hint">顧問先のページには出しません。事務所の仕訳変換の画面に並び、会計ソフトに入力したら「完了」を押します。</p></fieldset>`;
           if (b.type === 'custom' && b.cat && b.cat !== 'other') {
             const j = b.journal[0], opt = sel => `<option value="">（取引ごとに選ぶ）</option>` + wz.accts.map(a => `<option value="${a.code}"${a.code === sel ? ' selected' : ''}>${a.code} ${esc(a.name)}</option>`).join('');
             return `<fieldset class="cfg-book">${head}
@@ -1867,7 +1920,7 @@ html, body { margin: 0; }
         <div class="table-box"><table class="wz-sum"><tbody>
           ${row('顧問先', `${esc(wz.name)}${wz.mode === 'new' ? `（新規・サブドメイン ${esc(wz.sub || '自動')}）` : ''}`)}
           ${row('事業年度の始まり', `${wz.fyStart}月`)}
-          ${wz.books.map((b, i) => row(`${i + 1}番目`, `<b>${esc(b.name)}</b>　<span class="hint">${bookType(b)}</span>${b.type === 'custom' ? `<div class="hint">項目：${(b.fields || []).map(x => esc(x.label)).join('・')}${b.cat && b.cat !== 'other' ? `・仕訳：${esc(b.journal[0].dr ? acctName(b.journal[0].dr) : '取引ごとに選ぶ')} ／ ${esc(b.journal[0].cr ? acctName(b.journal[0].cr) : '取引ごとに選ぶ')}（${TAXES[b.journal[0].tax]?.label || ''}）` : ''}</div>` : `<div class="hint">科目 ${esc(acctName(b.acct))}${b.sub ? `・補助 ${esc(b.sub)}` : ''}${b.bankCode ? `・銀行 ${esc(b.bankCode)}` : ''}・始める前の残高 ${yen(Number(b.opening) || 0)}円${b.type === 'bank' ? '' : `・${b.kinds.map(k => KIND_NAMES[k]).join('・')}`}</div>`}`)).join('')}
+          ${wz.cats.filter(c => wz.books.some(b => catOf(b) === c)).map((c, ci) => row(`${ci + 1}. ${CATS[c][0]}`, wz.books.filter(b => catOf(b) === c).map(b => `<div style="margin-bottom:6px"><b>${esc(b.name)}</b>　<span class="hint">${b.how === 'direct' ? '事務所が会計ソフトに直接入力' : '顧問先がページで入力'}</span>${b.how === 'direct' ? (b.memo ? `<div class="hint">${esc(b.memo)}</div>` : '') : b.type === 'custom' ? `<div class="hint">項目：${(b.fields || []).map(x => esc(x.label)).join('・')}${b.cat && b.cat !== 'other' ? `・仕訳：${esc(b.journal[0].dr ? acctName(b.journal[0].dr) : '取引ごとに選ぶ')} ／ ${esc(b.journal[0].cr ? acctName(b.journal[0].cr) : '取引ごとに選ぶ')}（${TAXES[b.journal[0].tax]?.label || ''}）` : ''}</div>` : `<div class="hint">科目 ${esc(acctName(b.acct))}${b.sub ? `・補助 ${esc(b.sub)}` : ''}${b.bankCode ? `・銀行 ${esc(b.bankCode)}` : ''}・始める前の残高 ${yen(Number(b.opening) || 0)}円${b.type === 'bank' ? '' : `・${b.kinds.map(k => KIND_NAMES[k]).join('・')}`}</div>`}</div>`).join(''))).join('')}
           ${row('給与計算', wz.payOn ? `使う（${esc(wz.payroll.name)}）<div class="hint">${esc(Payroll.ruleText(wz.pay))}・未払 ${esc(acctName(wz.payroll.acctPay))}</div>` : '使わない')}
           ${row('メールアドレス', wz.emails.map(m => `<div>${esc(m.email)}${m.old ? '' : '（新しく登録）'}<span class="hint">：${!m.books || m.books.length === books.length ? 'すべての帳簿' : m.books.map(name).map(esc).join('・')}</span></div>`).join('') || '<span class="hint">なし（あとで「顧問先とメールアドレス」で足せます）</span>')}
         </tbody></table></div>`;
@@ -1915,25 +1968,22 @@ html, body { margin: 0; }
   });
   $('wzBody').addEventListener('change', e => {
     if (e.target.name === 'wz-mode') { wz.mode = e.target.value; wz.cid = ''; renderWizard(); }
-    const cat = e.target.dataset.wzcat;
-    if (cat) {
-      if (e.target.checked) wzAddBook(cat);
-      else {
-        const used = wz.books.filter(b => catOf(b) === cat && wz.used.has(b.id));
-        wz.books = wz.books.filter(b => catOf(b) !== cat || wz.used.has(b.id));
-        renderWizard();
-        if (used.length) { $('wzMsg').textContent = `${used.map(b => b.name).join('・')} には記入があるので外せません。`; }
-        return;
-      }
+    if (e.target.dataset.wzhow) {
+      const i = Number(e.target.dataset.wzhow), b = wz.books[i], c = catOf(b);
+      if (e.target.value === 'direct') {
+        if (wz.used.has(b.id)) { e.target.value = 'page'; $('wzMsg').className = 'msg'; $('wzMsg').textContent = `${b.name} には顧問先の記入があるので、会計ソフトに直接入力するものには変えられません。`; return; }
+        wz.books[i] = { id: b.id, cat: c, name: b.name, how: 'direct', memo: '' };
+      } else wz.books[i] = pageBook(c, b.id, b.name);
       renderWizard();
     }
   });
   $('wzBody').addEventListener('click', e => {
     const t = e.target.closest('button'); if (!t) return;
     if (t.dataset.wzmore) { wzAddBook(t.dataset.wzmore); renderWizard(); return; }
-    if (t.dataset.wzmv) {
-      const [i, d] = t.dataset.wzmv.split(':').map(Number), [b] = wz.books.splice(i, 1);
-      wz.books.splice(i + d, 0, b); renderWizard(); return;
+    if (t.dataset.wzmv) { const [i, d] = t.dataset.wzmv.split(':').map(Number); wzMove(i, d); renderWizard(); return; }
+    if (t.dataset.wzcmv) {
+      const [i, d] = t.dataset.wzcmv.split(':').map(Number);
+      [wz.cats[i], wz.cats[i + d]] = [wz.cats[i + d], wz.cats[i]]; renderWizard(); return;
     }
     if (t.dataset.wzrm !== undefined) { wz.books.splice(Number(t.dataset.wzrm), 1); renderWizard(); return; }
     if (t.dataset.wzrmmail !== undefined) { wz.emails.splice(Number(t.dataset.wzrmmail), 1); renderWizard(); return; }
@@ -1958,12 +2008,17 @@ html, body { margin: 0; }
         try { await wzLoad(wz.cid); } catch (e) { return err(e.message); }
       }
     }
-    if (wz.step === 1 && !wz.books.length) return err('使う入力を1つ以上選んでください。');
+    if (wz.step === 1 && !wz.books.length) return err('口座や帳簿を1つ以上足してください。');
+    if (wz.step === 1 && wz.books.some(b => !String(b.name).trim())) return err('名前が空のものがあります。');
     if (wz.step === 2) {
-      const bad = wz.books.find(b => !String(b.name).trim() || (b.type !== 'custom' && b.type !== 'bank' && !b.kinds.length));
+      const bad = wz.books.find(b => !String(b.name).trim() || (b.how !== 'direct' && b.type !== 'custom' && b.type !== 'bank' && !b.kinds.length));
       if (bad) return err('帳簿ごとに、名前と記入の種類を1つ以上決めてください。');
       const names = wz.books.map(b => b.name.trim());
       if (new Set(names).size !== names.length) return err('同じ名前の帳簿があります。見分けられるように名前を変えてください。');
+    }
+    if (wz.step === 1) {
+      const names = wz.books.map(b => b.name.trim());
+      if (new Set(names).size !== names.length) return err('同じ名前のものがあります。見分けられるように名前を変えてください（例：普通預金（A銀行））。');
     }
     if (wz.step === 4) {
       const none = wz.emails.find(x => x.books && !x.books.length);
@@ -1987,7 +2042,9 @@ html, body { margin: 0; }
     const access = Object.fromEntries(wz.emails.filter(x => x.books && x.books.length < ids.length).map(x => [x.email, x.books.filter(id => ids.includes(id))]));
     const old = d.config?.data || {};
     const payroll = wz.payOn ? { ...old.payroll, ...wz.payroll, enabled: true } : old.payroll ? { ...old.payroll, enabled: false } : undefined;
-    const data = { ...old, fyStart: wz.fyStart, cashbooks: wz.books, payroll, access, accts: wz.accts.map(a => ({ code: a.code, name: a.name })) };
+    const ordered = wz.cats.flatMap(c => wz.books.filter(b => catOf(b) === c));
+    const data = { ...old, fyStart: wz.fyStart, cashbooks: wzPage().map(({ how, ...b }) => ({ ...b, cat: catOf(b) })), direct: ordered.filter(b => b.how === 'direct').map(({ id, cat, name, memo }) => ({ id, cat, name, memo: memo || '' })),
+      plan: ordered.map(b => ({ id: b.id, cat: catOf(b) })), cats: wz.cats, payroll, access, accts: wz.accts.map(a => ({ code: a.code, name: a.name })) };
     await api(`/api/office/clients/${cid}/doc/config`, { method: 'PUT', body: JSON.stringify({ data, version: d.config?.version || 0 }) });
     if (wz.payOn) {
       const md = { ...(d.master?.data || {}), paySettings: { ...(d.master?.data?.paySettings || {}), ...wz.pay } };
