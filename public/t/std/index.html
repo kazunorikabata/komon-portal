@@ -1814,10 +1814,13 @@ th, td { border: 1px solid #000; padding: 1mm 1.5mm; } th { background: #eee; fo
       </tbody></table></div>`;
   }
 
-  // 給与（合計）の項目：仕訳が「科目／未払費用」なら支給、「未払費用／科目」なら控除
+  // 給与（合計）の項目：決めてあればそのまま。なければ仕訳が「科目／未払費用」なら支給、「未払費用／科目」なら控除
+  // 相手の科目（未払費用・諸口など）は、項目の仕訳にいちばん多く出てくる科目とする（事務所が科目を変えても分けられるように）
   function wageSides(b) {
-    const P = b.payAcct || '318', jr = k => (b.journal || []).find(r => r.field === k);
-    const side = f => { const r = jr(f.key); return f.kind !== 'number' || !r ? 'other' : r.cr === P ? 'pay' : r.dr === P ? 'ded' : 'other'; };
+    const cnt = {};
+    for (const r of b.journal || []) for (const a of [r.dr, r.cr]) if (a) cnt[a] = (cnt[a] || 0) + 1;
+    const P = Object.entries(cnt).sort((x, y) => y[1] - x[1])[0]?.[0] || b.payAcct || '318', jr = k => (b.journal || []).find(r => r.field === k);
+    const side = f => { const r = jr(f.key); return f.kind !== 'number' ? 'other' : f.wage || (!r ? 'other' : r.cr === P ? 'pay' : r.dr === P ? 'ded' : 'other'); };
     const F = cfields(b);
     return { pay: F.filter(f => side(f) === 'pay'), ded: F.filter(f => side(f) === 'ded'), other: F.filter(f => side(f) === 'other') };
   }

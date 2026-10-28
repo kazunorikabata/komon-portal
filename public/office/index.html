@@ -378,9 +378,9 @@ html, body { margin: 0; }
   // 給与（合計）：自由項目（月1回の用紙）で、項目ごとに仕訳を決める。支給は 科目／未払費用、控除は 未払費用／科目
   function wagePreset(acctBy = () => '') {
     const PAY = '318', F = [], J = [];
-    const add = (label, kind, j) => { const key = 'f' + (F.length + 1); F.push({ key, label, kind, ...(label === '支給日' ? { required: true } : {}) }); if (j) J.push({ field: key, tekiyo: '', ...j.j }); };
-    const pay = (label, dr, tax = '0') => add(label, 'number', { j: { dr, cr: PAY, tax } });
-    const ded = (label, cr, tax = '0') => add(label, 'number', { j: { dr: PAY, cr, tax } });
+    const add = (label, kind, j, wage) => { const key = 'f' + (F.length + 1); F.push({ key, label, kind, ...(label === '支給日' ? { required: true } : {}), ...(wage ? { wage } : {}) }); if (j) J.push({ field: key, tekiyo: '', ...j.j }); };
+    const pay = (label, dr, tax = '0') => add(label, 'number', { j: { dr, cr: PAY, tax } }, 'pay');
+    const ded = (label, cr, tax = '0') => add(label, 'number', { j: { dr: PAY, cr, tax } }, 'ded');
     add('支給日', 'date'); add('人数', 'number');
     pay('役員報酬', acctBy(/役員報酬/)); pay('給料手当', acctBy(/^給料/) || '621'); pay('雑給', acctBy(/雑給/)); pay('賞与', acctBy(/賞与/)); pay('通勤手当', acctBy(/旅費交通/) || '636', 'p10');
     for (const l of ['健康保険', '介護保険', '子ども・子育て支援金', '厚生年金', '雇用保険']) ded(l, acctBy(/法定福利/) || '627', 'n34');
@@ -1978,9 +1978,10 @@ html, body { margin: 0; }
             ${f('memo', '事務所のメモ（任意）', b.memo, 'placeholder="例：ネットバンキングのCSVを会計ソフトに取り込む"')}</div>
             <p class="hint">顧問先のページには出しません。事務所の画面に並び、毎月、月末の残高を入れて${b.how === 'journal' ? '、仕訳を入力し（CSVに入ります）' : '、会計ソフトに入力し'}、「完了」を押します。</p></fieldset>`;
           if (b.cat === 'pay' && b.type === 'custom') {
-            const P = b.payAcct || '318', opt = sel => `<option value="">（毎月選ぶ）</option>` + wz.accts.map(a => `<option value="${a.code}"${a.code === sel ? ' selected' : ''}>${a.code} ${esc(a.name)}</option>`).join('');
+            const cnt = {}; for (const r of b.journal) for (const x of [r.dr, r.cr]) if (x) cnt[x] = (cnt[x] || 0) + 1;
+            const P = Object.entries(cnt).sort((x, y) => y[1] - x[1])[0]?.[0] || b.payAcct || '318', opt = sel => `<option value="">（毎月選ぶ）</option>` + wz.accts.map(a => `<option value="${a.code}"${a.code === sel ? ' selected' : ''}>${a.code} ${esc(a.name)}</option>`).join('');
             const jr = k => b.journal.find(r => r.field === k);
-            const sideOf = f => { const r = jr(f.key); return !r ? '' : r.cr === P ? 'pay' : r.dr === P ? 'ded' : ''; };
+            const sideOf = f => { const r = jr(f.key); return f.wage || (!r ? '' : r.cr === P ? 'pay' : r.dr === P ? 'ded' : ''); };
             const rows = side => b.fields.filter(f => f.kind === 'number' && sideOf(f) === side).map(f => { const r = jr(f.key), k = side === 'pay' ? 'dr' : 'cr'; return `<tr>
               <td><input type="text" id="wz-${i}-${f.key}-label" data-wbf="${i}:${f.key}" value="${esc(f.label)}" aria-label="項目名"></td>
               <td><select id="wz-${i}-${f.key}-acct" data-wbjf="${i}:${f.key}:${k}" aria-label="${esc(f.label)}の科目">${opt(r[k])}</select></td>
@@ -2127,11 +2128,13 @@ html, body { margin: 0; }
     const t = e.target.closest('button'); if (!t) return;
     if (t.dataset.wzmore) { wzAddBook(t.dataset.wzmore); renderWizard(); return; }
     if (t.dataset.wzfadd) {
-      const [i, side] = t.dataset.wzfadd.split(':'), b = wz.books[Number(i)], P = b.payAcct || '318';
+      const [i, side] = t.dataset.wzfadd.split(':'), b = wz.books[Number(i)], cnt = {};
+      for (const r of b.journal) for (const x of [r.dr, r.cr]) if (x) cnt[x] = (cnt[x] || 0) + 1;
+      const P = Object.entries(cnt).sort((x, y) => y[1] - x[1])[0]?.[0] || b.payAcct || '318';
       let n = b.fields.length + 1; while (b.fields.some(f => f.key === 'f' + n)) n++;
       const key = 'f' + n, label = side === 'pay' ? '支給の項目' : '控除の項目';
       // メモより前に入れる
-      const at = b.fields.findIndex(f => f.kind === 'text'); b.fields.splice(at >= 0 ? at : b.fields.length, 0, { key, label, kind: 'number' });
+      const at = b.fields.findIndex(f => f.kind === 'text'); b.fields.splice(at >= 0 ? at : b.fields.length, 0, { key, label, kind: 'number', wage: side });
       b.journal.push({ field: key, dr: side === 'pay' ? '' : P, cr: side === 'pay' ? P : '', tax: '0', tekiyo: '' });
       renderWizard(); $(`wz-${i}-${key}-label`).select(); return;
     }
