@@ -375,12 +375,26 @@ html, body { margin: 0; }
   const isStd = () => current?.template === 'std';
   // 標準のひな形の出納帳（顧問先ページと同じ初期値）と、追加するときのひな形
   const DEFAULT_BOOK = { id: 'main', name: '現金出納帳', acct: '111', opening: 0, kinds: ['in', 'out'], cols: { partner: true }, depts: [], inTypes: ['預金から引き出し', '売上から', 'その他'], count: true, expPrint: true };
+  // 給与（合計）：自由項目（月1回の用紙）で、項目ごとに仕訳を決める。支給は 科目／未払費用、控除は 未払費用／科目
+  function wagePreset(acctBy = () => '') {
+    const PAY = '318', F = [], J = [];
+    const add = (label, kind, j) => { const key = 'f' + (F.length + 1); F.push({ key, label, kind, ...(label === '支給日' ? { required: true } : {}) }); if (j) J.push({ field: key, tekiyo: '', ...j.j }); };
+    const pay = (label, dr, tax = '0') => add(label, 'number', { j: { dr, cr: PAY, tax } });
+    const ded = (label, cr, tax = '0') => add(label, 'number', { j: { dr: PAY, cr, tax } });
+    add('支給日', 'date'); add('人数', 'number');
+    pay('役員報酬', acctBy(/役員報酬/)); pay('給料手当', acctBy(/^給料/) || '621'); pay('雑給', acctBy(/雑給/)); pay('賞与', acctBy(/賞与/)); pay('通勤手当', acctBy(/旅費交通/) || '636', 'p10');
+    for (const l of ['健康保険', '介護保険', '子ども・子育て支援金', '厚生年金', '雇用保険']) ded(l, acctBy(/法定福利/) || '627', 'n34');
+    ded('所得税', acctBy(/^預り金$/) || '323'); ded('住民税', acctBy(/預り金２|住民税/) || '323'); ded('その他の控除', '');
+    add('メモ', 'text');
+    return { name: '給与（合計）', type: 'custom', mode: 'form', cat: 'pay', payAcct: PAY, fields: F, journal: J, kinds: [], cols: {}, count: false, expPrint: false };
+  }
   const PRESETS = {
     simple: ['シンプル（相手先・内容・金額）', { name: '現金出納帳', kinds: ['in', 'out'], cols: { partner: true }, inTypes: ['預金から引き出し', 'その他'], count: true, expPrint: false }],
     detail: ['詳しく（科目・部署・登録番号も入力）', { name: '小口現金出納帳', kinds: ['in', 'out'], cols: { partner: true, dept: true, acct: true, invNo: true }, inTypes: ['売上より', '預金から引き出し', 'その他'], count: true, expPrint: false }],
     exp: ['経費精算方式（立替をまとめて精算・精算書を印刷）', { name: '経費精算', kinds: ['in', 'exp'], cols: { partner: true }, inTypes: ['預金から引き出し', 'その他'], count: true, expPrint: true }],
     custom_table: ['自由項目（表）（項目を決めて1行ずつ入れる。例：売上日報）', { name: '売上日報', type: 'custom', mode: 'table', fields: [{ key: 'f1', label: '日付', kind: 'date', required: true }, { key: 'f2', label: '内容', kind: 'text' }, { key: 'f3', label: '金額', kind: 'number', required: true }], journal: [], kinds: [], cols: {}, count: false, expPrint: false }],
     custom_form: ['自由項目（月1回の用紙）（項目を決めて月に1回入れる。例：月次報告）', { name: '月次報告', type: 'custom', mode: 'form', fields: [{ key: 'f1', label: '売上高', kind: 'number', required: true }, { key: 'f2', label: '客数', kind: 'number' }, { key: 'f3', label: 'メモ', kind: 'text' }], journal: [], kinds: [], cols: {}, count: false, expPrint: false }],
+    wage: ['給与（合計）（全員分の合計を、科目ごと（役員報酬・給料手当・雑給など）に入れる）', wagePreset(code => ({ '/^給料/': '621', '/旅費交通/': '636', '/法定福利/': '627', '/^預り金$/': '323', '/預り金２|住民税/': '324' })[String(code)] || '')],
     bank: ['通帳（預金）（手入力・CSVの読み込み・月末に通帳の残高と照合）', { name: '普通預金', type: 'bank', acct: '130', kinds: ['in', 'out'], cols: {}, inTypes: [], count: false, expPrint: false }],
   };
   const KIND_NAMES = { in: '入金', out: '出金', exp: '経費精算' };
@@ -663,13 +677,16 @@ html, body { margin: 0; }
     for (const e of CLIENT.employees) {
       const x = pd.rows[e.id]; if (!x) continue;
       const c = Payroll.calc(e, x, P.rates, P.tax, { month: THIS, lag: P.lag ?? 1 });
-      add(Payroll.isFixedMonthly(e) ? 'salary' : 'wage', c.taxable);
+      // 給与の科目：従業員ごとに決めたもの（役員報酬・給料手当・雑給）。決めていなければ、月給は給料手当、それ以外は雑給
+      add(['officer', 'salary', 'wage'].includes(e.kamoku) ? e.kamoku : Payroll.isFixedMonthly(e) ? 'salary' : 'wage', c.taxable);
       for (const k of ['commute', 'health', 'care', 'kids', 'pension', 'emp', 'itax', 'rtax', 'extraDed']) add(k, c[k]);
       for (const a of e.deductions || []) named[a.name || 'その他の控除'] = (named[a.name || 'その他の控除'] || 0) + (Number(a.amount) || 0);
     }
     const has = code => !!acct(code);
     const dr = (k, desc, def, tax, tek) => { if (t[k]) out.push({ key: `pay:${k}`, date: d, need: 'dr', cr: PAY, amt: t[k], tax, desc, def, tekiyo: tek, src: '給与計算' }); };
     const cr = (k, amt, desc, def, tax, tek) => { if (amt) out.push({ key: `pay:${k}`, date: d, dr: PAY, need: 'cr', amt, tax, desc, def, tekiyo: tek, src: '給与計算（控除）' }); };
+    const byName = re => state.accts.find(a => re.test(a.name))?.code || '';
+    dr('officer', '給与:役員報酬', byName(/役員報酬/), '0', h.replace('給与', '役員報酬'));
     dr('salary', '給与:給料手当', '621', '0', h);
     dr('wage', '給与:雑給', has('625') ? '625' : '621', '0', `${h}（アルバイト）`);
     dr('commute', '給与:通勤手当', '636', 'p10', `${h}・通勤手当`);
@@ -1855,13 +1872,14 @@ html, body { margin: 0; }
     ar: ['売掛金', '売上の請求を1件ずつ（日付・得意先・金額）→ 売掛金／売上'],
     ap: ['買掛金', '仕入の請求を1件ずつ（日付・仕入先・金額）→ 仕入／買掛金'],
     card: ['クレジット', 'カードの利用を1件ずつ（日付・利用先・金額）→ 経費／未払金'],
+    pay: ['給与', '全員分の合計を月に1回、科目ごと（役員報酬・給料手当・雑給など）に入れる。一人ずつ計算するときは下の「給与計算」'],
     other: ['その他', '項目を自由に決める（表または月1回の用紙）'],
   };
   // 事務所が入力するもの：会計ソフトに直接入力（direct）か、ここで仕訳入力（journal）。どちらも 'dx:ID'
   const offHow = b => b.how === 'direct' || b.how === 'journal';
   const HOW_NAMES = { page: '顧問先がページで入力', direct: '事務所が会計ソフトに直接入力', journal: '事務所が仕訳入力（このCSVに入れる）' };
   const catOf = b => b.cat || (b.type === 'bank' ? 'bank' : b.type === 'custom' ? 'other' : 'cash');
-  const DIRECT_NAMES = { bank: '普通預金', cash: '現金', ar: '売掛金', ap: '買掛金', card: 'クレジットカード', other: 'その他' };
+  const DIRECT_NAMES = { bank: '普通預金', cash: '現金', ar: '売掛金', ap: '買掛金', card: 'クレジットカード', pay: '給与', other: 'その他' };
   // 分類の順番と、分類の中の順番（顧問先がページで入力する帳簿と、事務所が会計ソフトに直接入力するもの）
   const catOrder = cfg => { const o = (cfg.cats || []).filter(c => CATS[c]); for (const c of Object.keys(CATS)) if (!o.includes(c)) o.push(c); return o; };
   function planItems(cfg) {
@@ -1874,7 +1892,7 @@ html, body { margin: 0; }
   }
   const CASH_STYLES = { simple: 'シンプル', detail: '詳しく', exp: '経費精算' };
   const cashStyle = b => b.kinds?.includes('exp') ? 'exp' : b.cols?.acct || b.cols?.dept || b.cols?.invNo ? 'detail' : 'simple';
-  const bookType = b => { const c = catOf(b); if (offHow(b)) return `${CATS[c][0]}（${HOW_NAMES[b.how]}）`; return c === 'cash' ? `現金（${CASH_STYLES[cashStyle(b)]}）` : c === 'other' ? `その他（${b.mode === 'form' ? '月1回の用紙' : '表'}）` : CATS[c][0]; };
+  const bookType = b => { const c = catOf(b); if (offHow(b)) return `${CATS[c][0]}（${HOW_NAMES[b.how]}）`; if (c === 'pay') return '給与（合計）'; return c === 'cash' ? `現金（${CASH_STYLES[cashStyle(b)]}）` : c === 'other' ? `その他（${b.mode === 'form' ? '月1回の用紙' : '表'}）` : CATS[c][0]; };
   // 種類ごとのひな形。売掛金・買掛金・クレジットは自由項目（表）で、金額から仕訳を出す
   function catBook(cat) {
     const acctBy = re => wz.accts.find(a => re.test(a.name))?.code || '';
@@ -1886,6 +1904,7 @@ html, body { margin: 0; }
     if (cat === 'ar') return tbl('売掛金', '得意先', URIKAKE, acctBy(/^売上/), 's10');
     if (cat === 'ap') return tbl('買掛金', '仕入先', acctBy(/^仕入/), KAIKAKE, 'p10');
     if (cat === 'card') return tbl('クレジットカード', '利用先', '', acctBy(/未払金/), 'p10');
+    if (cat === 'pay') return wagePreset(acctBy);
     return { ...clone(PRESETS.custom_table[1]), name: 'その他の入力', cat: 'other' };
   }
   const wzNewId = () => { let n = wz.books.length + 1, id = wz.books.some(b => b.id === 'main') ? '' : 'main'; while (!id || wz.books.some(b => b.id === id)) id = 'b' + n++; return id; };
@@ -1958,6 +1977,22 @@ html, body { margin: 0; }
             <label class="f" for="wz-${i}-acct">この口座・帳簿の科目（月末残高の照合に使う・任意）<select id="wz-${i}-acct" data-wb="${i}:acct">${wzAcct(b.acct)}</select></label>
             ${f('memo', '事務所のメモ（任意）', b.memo, 'placeholder="例：ネットバンキングのCSVを会計ソフトに取り込む"')}</div>
             <p class="hint">顧問先のページには出しません。事務所の画面に並び、毎月、月末の残高を入れて${b.how === 'journal' ? '、仕訳を入力し（CSVに入ります）' : '、会計ソフトに入力し'}、「完了」を押します。</p></fieldset>`;
+          if (b.cat === 'pay' && b.type === 'custom') {
+            const P = b.payAcct || '318', opt = sel => `<option value="">（毎月選ぶ）</option>` + wz.accts.map(a => `<option value="${a.code}"${a.code === sel ? ' selected' : ''}>${a.code} ${esc(a.name)}</option>`).join('');
+            const jr = k => b.journal.find(r => r.field === k);
+            const sideOf = f => { const r = jr(f.key); return !r ? '' : r.cr === P ? 'pay' : r.dr === P ? 'ded' : ''; };
+            const rows = side => b.fields.filter(f => f.kind === 'number' && sideOf(f) === side).map(f => { const r = jr(f.key), k = side === 'pay' ? 'dr' : 'cr'; return `<tr>
+              <td><input type="text" id="wz-${i}-${f.key}-label" data-wbf="${i}:${f.key}" value="${esc(f.label)}" aria-label="項目名"></td>
+              <td><select id="wz-${i}-${f.key}-acct" data-wbjf="${i}:${f.key}:${k}" aria-label="${esc(f.label)}の科目">${opt(r[k])}</select></td>
+              <td><select id="wz-${i}-${f.key}-tax" data-wbjf="${i}:${f.key}:tax" aria-label="${esc(f.label)}の税区分">${Object.entries(TAXES).map(([t, x]) => `<option value="${t}"${t === r.tax ? ' selected' : ''}>${x.label}</option>`).join('')}</select></td>
+              <td><button type="button" class="link-btn danger" data-wzfrm="${i}:${f.key}">消す</button></td></tr>`; }).join('');
+            const tbl = (side, h, kh) => `<h3 style="margin:4px 0 0;font-size:14px">${h}</h3><div class="table-box"><table class="accts"><thead><tr><th>項目（顧問先が入れる欄）</th><th>${kh}</th><th>税区分</th><th></th></tr></thead><tbody>${rows(side) || '<tr><td colspan="4" class="hint">ありません</td></tr>'}</tbody></table></div>
+              <div><button type="button" class="btn ghost" data-wzfadd="${i}:${side}">＋ ${side === 'pay' ? '支給' : '控除'}の項目を足す</button></div>`;
+            const pn = esc(wz.accts.find(a => a.code === P)?.name || P);
+            return `<fieldset class="cfg-book">${head}</div>
+              <p class="hint">顧問先は、その月の全員分の合計を、項目ごとに入れます（支給日・人数・メモも）。支給は「科目／${pn}」、控除は「${pn}／科目」の仕訳になります。使わない項目は消すか、顧問先が空欄のままにします。「毎月選ぶ」にした科目は、仕訳の画面で事務所が選びます（選んだ科目は覚えます）。</p>
+              ${tbl('pay', '支給', '科目（借方）')}${tbl('ded', '控除', '科目（貸方）')}</fieldset>`;
+          }
           if (b.type === 'custom' && b.cat && b.cat !== 'other') {
             const j = b.journal[0], opt = sel => `<option value="">（取引ごとに選ぶ）</option>` + wz.accts.map(a => `<option value="${a.code}"${a.code === sel ? ' selected' : ''}>${a.code} ${esc(a.name)}</option>`).join('');
             return `<fieldset class="cfg-book">${head}
@@ -2042,6 +2077,8 @@ html, body { margin: 0; }
       else wz[k] = t.value;
       return;
     }
+    if (t.dataset.wbf) { const [i, k] = t.dataset.wbf.split(':'); wz.books[Number(i)].fields.find(f => f.key === k).label = t.value; return; }
+    if (t.dataset.wbjf) { const [i, k, prop] = t.dataset.wbjf.split(':'); wz.books[Number(i)].journal.find(r => r.field === k)[prop] = t.value; return; }
     if (t.dataset.wbj) { const [i, key] = t.dataset.wbj.split(':'); wz.books[Number(i)].journal[0][key] = t.value; return; }
     if (t.dataset.wbstyle) {
       // 現金の入力のしかたを変えたら、記入の種類・項目などをそのひな形にそろえる
@@ -2089,6 +2126,16 @@ html, body { margin: 0; }
   $('wzBody').addEventListener('click', e => {
     const t = e.target.closest('button'); if (!t) return;
     if (t.dataset.wzmore) { wzAddBook(t.dataset.wzmore); renderWizard(); return; }
+    if (t.dataset.wzfadd) {
+      const [i, side] = t.dataset.wzfadd.split(':'), b = wz.books[Number(i)], P = b.payAcct || '318';
+      let n = b.fields.length + 1; while (b.fields.some(f => f.key === 'f' + n)) n++;
+      const key = 'f' + n, label = side === 'pay' ? '支給の項目' : '控除の項目';
+      // メモより前に入れる
+      const at = b.fields.findIndex(f => f.kind === 'text'); b.fields.splice(at >= 0 ? at : b.fields.length, 0, { key, label, kind: 'number' });
+      b.journal.push({ field: key, dr: side === 'pay' ? '' : P, cr: side === 'pay' ? P : '', tax: '0', tekiyo: '' });
+      renderWizard(); $(`wz-${i}-${key}-label`).select(); return;
+    }
+    if (t.dataset.wzfrm) { const [i, k] = t.dataset.wzfrm.split(':'), b = wz.books[Number(i)]; b.fields = b.fields.filter(f => f.key !== k); b.journal = b.journal.filter(r => r.field !== k); renderWizard(); return; }
     if (t.dataset.wzmv) { const [i, d] = t.dataset.wzmv.split(':').map(Number); wzMove(i, d); renderWizard(); return; }
     if (t.dataset.wzcmv) {
       const [i, d] = t.dataset.wzcmv.split(':').map(Number);

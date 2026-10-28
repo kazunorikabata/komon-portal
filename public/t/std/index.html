@@ -139,6 +139,14 @@ td.date { font-family: var(--font-num); white-space: nowrap; }
 td.desc small { display: block; color: var(--ink-soft); font-size: 12px; }
 tr.carry td { color: var(--ink-soft); background: color-mix(in srgb, var(--rule) 30%, transparent); }
 tr.total td { border-top: 1px solid var(--rule-red); border-bottom: 2px solid var(--rule-red); font-weight: 500; }
+.sr-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+@media (max-width: 860px) { .sr-grid { grid-template-columns: 1fr; } }
+.sr-sec { display: grid; gap: 10px; }
+.sr-sec h4 { margin: 0; font-size: 13px; color: var(--ink-soft); font-weight: 500; letter-spacing: .06em; border-bottom: 1px solid var(--rule-red); padding-bottom: 4px; }
+.sr-calc table { min-width: 0; font-size: 14px; }
+.sr-calc td { padding: 6px 10px; }
+.sr-calc tr.sub td { color: var(--ink-soft); font-size: 13px; }
+.sr-calc tr.grand td { font-size: 17px; font-weight: 700; color: var(--accent); border-bottom: 2px solid var(--rule-red); }
 .tag { font-size: 11px; padding: 1px 6px; border-radius: 4px; border: 1px solid var(--rule); color: var(--ink-soft); margin-left: 6px; white-space: nowrap; }
 .tag.reduced { border-color: var(--warn-fg); color: var(--warn-fg); }
 .kind { font-size: 12px; padding: 1px 8px; border-radius: 999px; white-space: nowrap; background: var(--accent-soft); color: var(--accent); }
@@ -509,14 +517,14 @@ td.partner { min-width: 7em; }
   }
 
   // タブは分類（通帳・現金・売掛金・買掛金・クレジット・その他・給与）ごとにまとめ、その中に口座・帳簿を順に並べる
-  const CAT_NAMES = { bank: '通帳', cash: '現金', ar: '売掛金', ap: '買掛金', card: 'クレジット', other: 'その他' };
+  const CAT_NAMES = { bank: '通帳', cash: '現金', ar: '売掛金', ap: '買掛金', card: 'クレジット', pay: '給与', other: 'その他' };
   const catOfBook = b => b.isPay ? 'pay' : b.cat || (b.type === 'bank' ? 'bank' : b.type === 'custom' ? 'other' : 'cash');
   function bookGroups() {
     const groups = [];
     for (const b of allBooks()) {
       const c = catOfBook(b);
       let g = groups.find(x => x.cat === c);
-      if (!g) groups.push(g = { cat: c, name: c === 'pay' ? b.name : CAT_NAMES[c], books: [] });
+      if (!g) groups.push(g = { cat: c, name: CAT_NAMES[c] || b.name, books: [] });
       g.books.push(b);
     }
     const order = CONFIG.cats || [], at = c => c === 'pay' ? 99 : order.includes(c) ? order.indexOf(c) : 50;
@@ -1446,6 +1454,7 @@ tfoot td { font-weight: bold; }
         <div class="fields">
           <label class="f" for="ef-name">氏名<input type="text" id="ef-name" value="${esc(e.name)}"></label>
           <label class="f" for="ef-sex">性別（任意・賃金台帳用）<select id="ef-sex"><option value=""></option>${['男', '女'].map(v => `<option${e.sex === v ? ' selected' : ''}>${v}</option>`).join('')}</select></label>
+          <label class="f" for="ef-kamoku">給与の科目（仕訳）<select id="ef-kamoku">${[['', '自動（月給は給料手当、それ以外は雑給）'], ['officer', '役員報酬'], ['salary', '給料手当'], ['wage', '雑給']].map(([k, l]) => `<option value="${k}"${(e.kamoku || '') === k ? ' selected' : ''}>${l}</option>`).join('')}</select></label>
           <label class="f" for="ef-type">給与の形<select id="ef-type">${Object.entries(P().TYPES).map(([k, l]) => `<option value="${k}"${(e.type || 'monthly') === k ? ' selected' : ''}>${l}</option>`).join('')}</select></label>
           ${e.type === 'manual' ? `<p style="margin:0;font-size:12px;color:var(--ink-soft);align-self:end">支給額は、毎月の給与の画面で入れます。<input type="hidden" id="ef-base" value=""></p>` : `<label class="f" for="ef-base">${unit}<input type="number" id="ef-base" value="${e.base ?? ''}"></label>`}
           <label class="f" for="ef-otRate">残業の時間単価（円・任意）<input type="number" id="ef-otRate" value="${e.otRate ?? ''}"></label>
@@ -1492,7 +1501,7 @@ tfoot td { font-weight: bold; }
   });
   function readEmpForm() {
     const e = view.empDraft, v = id => $(id).value.trim(), num = id => optNum($(id).value);
-    Object.assign(e, { birth: v('ef-birth') || undefined, name: v('ef-name'), sex: v('ef-sex') || undefined, type: v('ef-type'), base: num('ef-base'), otRate: num('ef-otRate'), joined: v('ef-joined') || undefined, left: v('ef-left') || undefined,
+    Object.assign(e, { birth: v('ef-birth') || undefined, name: v('ef-name'), sex: v('ef-sex') || undefined, kamoku: v('ef-kamoku') || undefined, type: v('ef-type'), base: num('ef-base'), otRate: num('ef-otRate'), joined: v('ef-joined') || undefined, left: v('ef-left') || undefined,
       commuteType: v('ef-commuteType'), commute: num('ef-commute'), shaho: $('ef-shaho').checked, std: num('ef-std'), care: $('ef-care').checked, koyo: $('ef-koyo').checked,
       col: v('ef-col'), deps: num('ef-deps') || 0, active: !$('ef-active').checked });
     for (const [k, cnt] of [['allowances', 3], ['deductions', 2]]) e[k] = Array.from({ length: cnt }, (_, i) => ({ name: v(`ef-${k}-${i}-name`), amount: num(`ef-${k}-${i}-amount`) })).filter(x => x.name || x.amount);
@@ -1774,6 +1783,8 @@ th, td { border: 1px solid #000; padding: 1mm 1.5mm; } th { background: #eee; fo
     const b = BK(), m = view.month, lock = locked(), dis = lock ? ' disabled' : '', F = cfields(b), rows = rowsOf(b.id, m), box = $('customBox');
     if (!F.length) { box.innerHTML = '<p class="empty">事務所で項目がまだ決められていません。</p>'; return; }
     if (view.kind === 'ccsv') { renderCustomCsv(); return; }
+    // 給与（合計）：支給と控除に分けて並べ、差引支給額を出す
+    if (b.mode === 'form' && b.cat === 'pay') { renderWageForm(b, rows, lock, dis); return; }
     // 月1回の用紙
     if (b.mode === 'form') {
       const r = rows.find(x => x.id.startsWith(FORM_ID)) || rows[0], v = view.draft || r?.v || {};
@@ -1802,6 +1813,41 @@ th, td { border: 1px solid #000; padding: 1mm 1.5mm; } th { background: #eee; fo
         ${sums.length && rows.length ? `<tr class="total">${F.map((f, i) => { const s2 = sums.find(([x]) => x.key === f.key); return `<td${s2 ? ' class="num"' : ''}>${s2 ? yen(s2[1]) : i === 0 ? '合計' : ''}</td>`; }).join('')}<td></td></tr>` : ''}
       </tbody></table></div>`;
   }
+
+  // 給与（合計）の項目：仕訳が「科目／未払費用」なら支給、「未払費用／科目」なら控除
+  function wageSides(b) {
+    const P = b.payAcct || '318', jr = k => (b.journal || []).find(r => r.field === k);
+    const side = f => { const r = jr(f.key); return f.kind !== 'number' || !r ? 'other' : r.cr === P ? 'pay' : r.dr === P ? 'ded' : 'other'; };
+    const F = cfields(b);
+    return { pay: F.filter(f => side(f) === 'pay'), ded: F.filter(f => side(f) === 'ded'), other: F.filter(f => side(f) === 'other') };
+  }
+  function renderWageForm(b, rows, lock, dis) {
+    const r = rows.find(x => x.id.startsWith(FORM_ID)) || rows[0], v = view.draft || r?.v || {}, S = wageSides(b);
+    const inp = f => `<label class="f" for="cu-${f.key}">${esc(f.label)}${fieldInput(f, v[f.key], 'cu', dis)}</label>`;
+    $('customBox').innerHTML = `<div class="sr-grid">
+      <form class="entry" id="cfForm" novalidate>
+        <h3>${lock ? 'この月は提出済みのため直せません' : r ? '保存した内容（直したら保存してください）' : '入力する'}</h3>
+        <p style="margin:0;font-size:13px;color:var(--ink-soft)">給与明細の一人ひとりではなく、その月の全員分の合計を入力してください。ない項目は空欄のままで大丈夫です。</p>
+        <div class="sr-sec"><h4>支給日など</h4><div class="fields">${S.other.filter(f => f.kind !== 'text').map(inp).join('')}</div></div>
+        <div class="sr-sec"><h4>支給（全員分の合計）</h4><div class="fields">${S.pay.map(inp).join('')}</div></div>
+        <div class="sr-sec"><h4>控除（全員分の合計）</h4><div class="fields">${S.ded.map(inp).join('')}</div></div>
+        ${S.other.some(f => f.kind === 'text') ? `<div class="fields">${S.other.filter(f => f.kind === 'text').map(inp).join('')}</div>` : ''}
+        <div class="form-foot"><span class="msg" id="cuMsg" role="status"></span>${lock ? '' : '<button type="submit" class="btn">保存する</button>'}</div>
+      </form>
+      <div class="entry sr-calc"><h3>計算結果</h3><div class="table-box"><table id="wgCalc"></table></div></div>
+    </div>`;
+    updateWageCalc(b);
+  }
+  function updateWageCalc(b) {
+    const el = $('wgCalc'); if (!el) return;
+    const v = readFields(b), S = wageSides(b), n = f => Number(v[f.key]) || 0;
+    const gross = S.pay.reduce((t, f) => t + n(f), 0), ded = S.ded.reduce((t, f) => t + n(f), 0);
+    const row = (l, x, cls = '') => `<tr class="${cls}"><td>${esc(l)}</td><td class="num">${yen(x)}</td></tr>`;
+    el.innerHTML = `<tbody><tr class="sub"><td colspan="2">支給</td></tr>${S.pay.filter(n).map(f => row(f.label, n(f))).join('')}${row('総支給額', gross, 'total')}
+      <tr class="sub"><td colspan="2">控除</td></tr>${S.ded.filter(n).map(f => row(f.label, n(f))).join('')}${row('控除の合計', ded, 'total')}
+      <tr class="grand"><td>差引支給額</td><td class="num">${yen(gross - ded)}</td></tr></tbody>`;
+  }
+  $('customBox').addEventListener('input', () => { const b = BK(); if (isCustom(b) && b.mode === 'form' && b.cat === 'pay') updateWageCalc(b); });
 
   $('customBox').addEventListener('submit', e => {
     if (e.target.id !== 'cfForm') return;
